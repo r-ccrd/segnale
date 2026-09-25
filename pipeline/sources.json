@@ -1,0 +1,662 @@
+{
+  "_readme": "Fonti verificate il 2026-09-25. weight = autorevolezza editoriale (0-1, giudizio nostro, modificabile). category = categoria di default (riceve un bonus, non è vincolante). dateType: release | project | article | detected. Per aggiungere una fonte: copia un blocco, cambia id/url, lancia `python pipeline/build_feed.py --only <id> --dry-run`.",
+  "retentionDays": 120,
+  "sources": [
+    {
+      "id": "googlefonts",
+      "name": "Google Fonts",
+      "home": "https://fonts.google.com",
+      "type": "googlefonts",
+      "url": "https://fonts.google.com/metadata/fonts",
+      "category": "type",
+      "weight": 0.8,
+      "kind": "release",
+      "dateType": "release",
+      "windowDays": 120,
+      "note": "Metadati pubblici del catalogo: dateAdded = data ufficiale di release, trending = rank di crescita."
+    },
+    {
+      "id": "fontsinuse",
+      "name": "Fonts In Use",
+      "home": "https://fontsinuse.com",
+      "type": "page",
+      "url": "https://fontsinuse.com/",
+      "base": "https://fontsinuse.com",
+      "linkPattern": "/uses/\\d+/[a-z0-9\\-]+",
+      "category": "type",
+      "weight": 0.85,
+      "crawlDelay": 10,
+      "maxNewPerRun": 12,
+      "fontsPattern": "More\\s+about\\s+([^<]{2,60})</a>",
+      "dateType": "article",
+      "note": "RSS rotto (HTTP 500): page watcher sulla homepage, crawl-delay 10s come da robots.txt."
+    },
+    {
+      "id": "typewolf",
+      "name": "Typewolf",
+      "home": "https://www.typewolf.com",
+      "type": "rss",
+      "url": "https://www.typewolf.com/feed",
+      "category": "web",
+      "weight": 0.75,
+      "award": "Typewolf Site of the Day",
+      "dateType": "detected",
+      "tagsAreFonts": true,
+      "firstRunMax": 4,
+      "maxItems": 10,
+      "note": "Il feed non ha date: si usa la data di prima rilevazione. I tag sono i font usati dal sito."
+    },
+    {
+      "id": "ilovetypography",
+      "name": "I Love Typography",
+      "home": "https://ilovetypography.com",
+      "type": "rss",
+      "url": "https://ilovetypography.com/feed/",
+      "category": "type",
+      "weight": 0.7,
+      "maxItems": 8
+    },
+    {
+      "id": "pangrampangram",
+      "name": "Pangram Pangram",
+      "home": "https://pangrampangram.com",
+      "type": "rss",
+      "url": "https://pangrampangram.com/blogs/journal.atom",
+      "category": "type",
+      "weight": 0.7,
+      "maxItems": 10,
+      "note": "Journal della foundry: annunci di nuove famiglie e progetti che le usano."
+    },
+    {
+      "id": "commercialtype",
+      "name": "Commercial Type",
+      "home": "https://commercialtype.com",
+      "type": "rss",
+      "url": "https://commercialtype.com/news/rss",
+      "category": "type",
+      "weight": 0.8,
+      "maxItems": 10
+    },
+    {
+      "id": "velvetyne",
+      "name": "Velvetyne",
+      "home": "https://velvetyne.fr",
+      "type": "rss",
+      "url": "https://velvetyne.fr/rss",
+      "category": "type",
+      "weight": 0.7,
+      "maxItems": 6,
+      "note": "Foundry libre/open source. Bassa frequenza."
+    },
+    {
+      "id": "dezeen_typography",
+      "name": "Dezeen Typography",
+      "home": "https://www.dezeen.com/tag/typography/",
+      "type": "rss",
+      "url": "https://www.dezeen.com/tag/typography/feed/",
+      "category": "type",
+      "weight": 0.75,
+      "maxItems": 10
+    },
+    {
+      "id": "brandnew",
+      "name": "Brand New",
+      "home": "https://www.underconsideration.com/brandnew/",
+      "type": "page",
+      "url": "https://www.underconsideration.com/brandnew/",
+      "linkPattern": "https://www\\.underconsideration\\.com/brandnew/archives/[a-z0-9_]+\\.php",
+      "category": "branding",
+      "weight": 0.95,
+      "crawlDelay": 2,
+      "maxNewPerRun": 12,
+      "titleFrom": "description",
+      "dateTextPattern": true,
+      "dateType": "article",
+      "note": "RSS fermo al 2013/2020: page watcher. Titolo = og:description ('New Identity for X by Y')."
+    },
+    {
+      "id": "tbi",
+      "name": "The Brand Identity",
+      "home": "https://the-brandidentity.com",
+      "type": "page",
+      "url": "https://the-brandidentity.com/",
+      "base": "https://the-brandidentity.com",
+      "linkPattern": "/project/[a-z0-9%\\-]+",
+      "category": "branding",
+      "weight": 0.95,
+      "crawlDelay": 2,
+      "maxNewPerRun": 12,
+      "dateType": "article",
+      "note": "Nessun feed (restituisce HTML): page watcher, data da article:published_time."
+    },
+    {
+      "id": "bpo",
+      "name": "BP&O",
+      "home": "https://bpando.org",
+      "type": "rss",
+      "url": "https://bpando.org/feed/",
+      "category": "branding",
+      "weight": 0.85,
+      "maxItems": 12
+    },
+    {
+      "id": "mindsparkle",
+      "name": "Mindsparkle Mag",
+      "home": "https://mindsparklemag.com",
+      "type": "rss",
+      "url": "https://mindsparklemag.com/feed/",
+      "category": "branding",
+      "weight": 0.7,
+      "maxItems": 12
+    },
+    {
+      "id": "dezeen_branding",
+      "name": "Dezeen Branding",
+      "home": "https://www.dezeen.com/tag/branding/",
+      "type": "rss",
+      "url": "https://www.dezeen.com/tag/branding/feed/",
+      "category": "branding",
+      "weight": 0.75,
+      "maxItems": 10
+    },
+    {
+      "id": "dieline",
+      "name": "The Dieline",
+      "home": "https://thedieline.com",
+      "type": "rss",
+      "url": "https://thedieline.com/feed",
+      "category": "packaging",
+      "weight": 0.8,
+      "maxItems": 10
+    },
+    {
+      "id": "potw",
+      "name": "Packaging of the World",
+      "home": "https://packagingoftheworld.com",
+      "type": "rss",
+      "url": "https://packagingoftheworld.com/feed",
+      "category": "packaging",
+      "weight": 0.65,
+      "maxItems": 10,
+      "authorIsCreator": true,
+      "dateType": "project",
+      "note": "Progetti inviati dagli studi: l'autore del post è lo studio."
+    },
+    {
+      "id": "awwwards",
+      "name": "Awwwards",
+      "home": "https://www.awwwards.com/websites/sites_of_the_day/",
+      "type": "rss",
+      "url": "https://feeds.feedburner.com/awwwards-sites-of-the-day",
+      "category": "web",
+      "weight": 0.85,
+      "award": "Awwwards Site of the Day",
+      "maxItems": 14
+    },
+    {
+      "id": "thefwa",
+      "name": "FWA",
+      "home": "https://thefwa.com",
+      "type": "rss",
+      "url": "https://thefwa.com/rss",
+      "category": "web",
+      "weight": 0.8,
+      "award": "FWA of the Day",
+      "maxItems": 10
+    },
+    {
+      "id": "onepagelove",
+      "name": "One Page Love",
+      "home": "https://onepagelove.com",
+      "type": "rss",
+      "url": "https://onepagelove.com/feed",
+      "category": "web",
+      "weight": 0.6,
+      "maxItems": 8,
+      "exclude": "\\btemplates?\\b|\\btheme\\b|\\bfree\\b"
+    },
+    {
+      "id": "landbook",
+      "name": "Land-book",
+      "home": "https://land-book.com",
+      "type": "rss",
+      "url": "https://land-book.com/feed",
+      "category": "web",
+      "weight": 0.55,
+      "maxItems": 10
+    },
+    {
+      "id": "minimalgallery",
+      "name": "Minimal Gallery",
+      "home": "https://minimal.gallery",
+      "type": "rss",
+      "url": "https://minimal.gallery/feed/",
+      "category": "web",
+      "weight": 0.6,
+      "maxItems": 8
+    },
+    {
+      "id": "nngroup",
+      "name": "Nielsen Norman Group",
+      "home": "https://www.nngroup.com",
+      "type": "rss",
+      "url": "https://www.nngroup.com/feed/rss/",
+      "category": "uiux",
+      "weight": 0.65,
+      "kind": "story",
+      "maxItems": 8
+    },
+    {
+      "id": "smashing",
+      "name": "Smashing Magazine",
+      "home": "https://www.smashingmagazine.com",
+      "type": "rss",
+      "url": "https://www.smashingmagazine.com/feed/",
+      "category": "uiux",
+      "weight": 0.5,
+      "maxItems": 8,
+      "require": "design|\\bux\\b|\\bui\\b|interface|typograph|colou?r|layout|accessib|figma|pattern|animation|motion",
+      "exclude": "\\bjavascript\\b|\\breact\\b|\\btypescript\\b|\\bwordpress\\b|\\bseo\\b|\\bnode\\b|\\bnext\\.js\\b"
+    },
+    {
+      "id": "figma_release",
+      "name": "Figma release notes",
+      "home": "https://www.figma.com/release-notes/",
+      "type": "rss",
+      "url": "https://www.figma.com/release-notes/feed/atom.xml",
+      "category": "tools",
+      "weight": 0.8,
+      "kind": "release",
+      "dateType": "release",
+      "maxItems": 10
+    },
+    {
+      "id": "figma_blog",
+      "name": "Figma Blog",
+      "home": "https://www.figma.com/blog/",
+      "type": "rss",
+      "url": "https://www.figma.com/blog/feed/atom.xml",
+      "category": "tools",
+      "weight": 0.6,
+      "maxItems": 8
+    },
+    {
+      "id": "penpot",
+      "name": "Penpot releases",
+      "home": "https://github.com/penpot/penpot/releases",
+      "type": "rss",
+      "url": "https://github.com/penpot/penpot/releases.atom",
+      "category": "tools",
+      "weight": 0.6,
+      "kind": "release",
+      "dateType": "release",
+      "maxItems": 4,
+      "note": "Tool open source. Le pre-release (rc/alpha/beta) vengono scartate."
+    },
+    {
+      "id": "blender",
+      "name": "Blender",
+      "home": "https://www.blender.org/news/",
+      "type": "rss",
+      "url": "https://www.blender.org/feed/",
+      "category": "3d",
+      "weight": 0.65,
+      "maxItems": 4,
+      "require": "releas|\\b\\d\\.\\d\\b|\\bbeta\\b|new features"
+    },
+    {
+      "id": "webflow_updates",
+      "name": "Webflow Updates",
+      "home": "https://webflow.com/updates",
+      "type": "rss",
+      "url": "https://webflow.com/updates/rss.xml",
+      "category": "tools",
+      "weight": 0.5,
+      "kind": "release",
+      "dateType": "release",
+      "maxItems": 6,
+      "titleStrip": "\\s*\\|\\s*Webflow Updates\\s*$"
+    },
+    {
+      "id": "cgchannel",
+      "name": "CG Channel",
+      "home": "https://www.cgchannel.com",
+      "type": "rss",
+      "url": "https://www.cgchannel.com/feed/",
+      "category": "3d",
+      "weight": 0.6,
+      "maxItems": 10,
+      "disabled": true,
+      "note": "Feed RSS fermo al 29 set 2024 (verificato il 25 set 2026): spostato tra le fonti manuali."
+    },
+    {
+      "id": "itsnicethat",
+      "name": "It's Nice That",
+      "home": "https://www.itsnicethat.com",
+      "type": "rss",
+      "url": "https://feeds.feedburner.com/itsnicethat/SlXC",
+      "category": "editorial",
+      "weight": 0.9,
+      "maxItems": 20,
+      "categoryBoost": 1.5
+    },
+    {
+      "id": "creativeboom",
+      "name": "Creative Boom",
+      "home": "https://www.creativeboom.com",
+      "type": "rss",
+      "url": "https://www.creativeboom.com/feed/",
+      "category": "editorial",
+      "weight": 0.7,
+      "maxItems": 16,
+      "categoryBoost": 1.5
+    },
+    {
+      "id": "designobserver",
+      "name": "Design Observer",
+      "home": "https://designobserver.com",
+      "type": "rss",
+      "url": "https://designobserver.com/feed/",
+      "category": "editorial",
+      "weight": 0.7,
+      "maxItems": 8
+    },
+    {
+      "id": "magculture",
+      "name": "magCulture",
+      "home": "https://magculture.com",
+      "type": "rss",
+      "url": "https://magculture.com/blogs/journal.atom",
+      "category": "editorial",
+      "weight": 0.8,
+      "maxItems": 10
+    },
+    {
+      "id": "stack",
+      "name": "Stack Magazines",
+      "home": "https://www.stackmagazines.com",
+      "type": "rss",
+      "url": "https://www.stackmagazines.com/feed/",
+      "category": "editorial",
+      "weight": 0.65,
+      "maxItems": 6
+    },
+    {
+      "id": "designboom",
+      "name": "designboom",
+      "home": "https://www.designboom.com",
+      "type": "rss",
+      "url": "https://www.designboom.com/feed/",
+      "category": "editorial",
+      "weight": 0.7,
+      "maxItems": 10,
+      "categoryBoost": 1.0,
+      "require": "graphic|typograph|typeface|\\bfont|branding|brand identity|visual identity|\\blogo|poster|packaging|illustrat|editorial|book design|signage|wayfinding|motion|animation",
+      "note": "Magazine generalista (molta architettura): passa solo ciò che parla di design grafico."
+    },
+    {
+      "id": "abduzeedo",
+      "name": "Abduzeedo",
+      "home": "https://abduzeedo.com",
+      "type": "rss",
+      "url": "https://abduzeedo.com/rss.xml",
+      "category": "branding",
+      "weight": 0.65,
+      "maxItems": 16,
+      "titlePrefixCategory": true,
+      "categoryBoost": 1.0,
+      "note": "I titoli hanno un prefisso di categoria ('Brand Identity:', 'Typography:'...) usato per classificare."
+    },
+    {
+      "id": "printmag",
+      "name": "PRINT",
+      "home": "https://www.printmag.com",
+      "type": "rss",
+      "url": "https://www.printmag.com/feed/",
+      "category": "editorial",
+      "weight": 0.65,
+      "maxItems": 12,
+      "categoryBoost": 1.5
+    },
+    {
+      "id": "slanted",
+      "name": "Slanted",
+      "home": "https://www.slanted.de",
+      "type": "rss",
+      "url": "https://www.slanted.de/feed/",
+      "category": "editorial",
+      "weight": 0.65,
+      "maxItems": 8
+    },
+    {
+      "id": "motionographer",
+      "name": "Motionographer",
+      "home": "https://motionographer.com",
+      "type": "rss",
+      "url": "https://motionographer.com/feed/",
+      "category": "motion",
+      "weight": 0.85,
+      "maxItems": 10
+    },
+    {
+      "id": "vimeo_staffpicks",
+      "name": "Vimeo Staff Picks",
+      "home": "https://vimeo.com/channels/staffpicks",
+      "type": "rss",
+      "url": "https://vimeo.com/channels/staffpicks/videos/rss",
+      "category": "motion",
+      "weight": 0.7,
+      "maxItems": 10,
+      "authorIsCreator": true,
+      "award": "Vimeo Staff Pick",
+      "require": "animat|motion|\\b3d\\b|cgi|stop.?motion|title sequence|graphic|illustrat|typograph|visual|design"
+    },
+    {
+      "id": "80lv",
+      "name": "80 Level",
+      "home": "https://80.lv",
+      "type": "rss",
+      "url": "https://80.lv/feed",
+      "category": "3d",
+      "weight": 0.7,
+      "maxItems": 10
+    },
+    {
+      "id": "colossal",
+      "name": "Colossal",
+      "home": "https://www.thisiscolossal.com",
+      "type": "rss",
+      "url": "https://www.thisiscolossal.com/feed/",
+      "category": "illustration",
+      "weight": 0.75,
+      "maxItems": 10
+    },
+    {
+      "id": "booooooom",
+      "name": "Booooooom",
+      "home": "https://www.booooooom.com",
+      "type": "rss",
+      "url": "https://www.booooooom.com/feed/",
+      "category": "illustration",
+      "weight": 0.7,
+      "maxItems": 8
+    },
+    {
+      "id": "behance",
+      "name": "Behance Featured",
+      "home": "https://www.behance.net/featured",
+      "type": "rss",
+      "url": "https://www.behance.net/feeds/projects",
+      "category": "branding",
+      "weight": 0.65,
+      "maxItems": 20,
+      "categoryBoost": 0.5,
+      "dateType": "project",
+      "note": "Progetti 'Featured' scelti dalla redazione Behance. Data = pubblicazione del progetto."
+    }
+  ],
+  "manual": [
+    {
+      "name": "Codrops",
+      "url": "https://tympanus.net/codrops/",
+      "category": "web",
+      "reason": "Feed disattivato dal sito (HTTP 410 'No feed available')."
+    },
+    {
+      "name": "Godly",
+      "url": "https://godly.website",
+      "category": "web",
+      "reason": "Nessun feed pubblico; sito JS-only."
+    },
+    {
+      "name": "Siteinspire",
+      "url": "https://www.siteinspire.com",
+      "category": "web",
+      "reason": "Richieste automatiche respinte (HTTP 429)."
+    },
+    {
+      "name": "CSS Design Awards",
+      "url": "https://www.cssdesignawards.com",
+      "category": "web",
+      "reason": "Challenge anti-bot (HTTP 202)."
+    },
+    {
+      "name": "Lapa Ninja",
+      "url": "https://www.lapa.ninja",
+      "category": "web",
+      "reason": "Accesso automatico negato (HTTP 403)."
+    },
+    {
+      "name": "Dribbble Popular",
+      "url": "https://dribbble.com/shots/popular",
+      "category": "uiux",
+      "reason": "Challenge anti-bot sui feed (HTTP 202)."
+    },
+    {
+      "name": "Design Week",
+      "url": "https://www.designweek.co.uk",
+      "category": "branding",
+      "reason": "Feed bloccato (HTTP 403)."
+    },
+    {
+      "name": "Creative Review",
+      "url": "https://www.creativereview.co.uk",
+      "category": "branding",
+      "reason": "Feed bloccato (HTTP 403)."
+    },
+    {
+      "name": "Collater.al",
+      "url": "https://www.collater.al",
+      "category": "editorial",
+      "reason": "Challenge anti-bot (HTTP 202)."
+    },
+    {
+      "name": "AIGA Eye on Design",
+      "url": "https://eyeondesign.aiga.org",
+      "category": "editorial",
+      "reason": "Feed non più disponibile (HTTP 404)."
+    },
+    {
+      "name": "Identity Designed",
+      "url": "https://identitydesigned.com",
+      "category": "branding",
+      "reason": "Feed fermo (ultimo post dicembre 2024)."
+    },
+    {
+      "name": "Klim Type Foundry",
+      "url": "https://klim.co.nz",
+      "category": "type",
+      "reason": "Nessun feed."
+    },
+    {
+      "name": "Grilli Type",
+      "url": "https://www.grillitype.com",
+      "category": "type",
+      "reason": "Nessun feed."
+    },
+    {
+      "name": "Dinamo",
+      "url": "https://abcdinamo.com",
+      "category": "type",
+      "reason": "Nessun feed."
+    },
+    {
+      "name": "Future Fonts",
+      "url": "https://www.futurefonts.xyz",
+      "category": "type",
+      "reason": "Nessun feed (le release in beta sono solo sul sito)."
+    },
+    {
+      "name": "Production Type",
+      "url": "https://www.productiontype.com",
+      "category": "type",
+      "reason": "Nessun feed."
+    },
+    {
+      "name": "Typotheque",
+      "url": "https://www.typotheque.com",
+      "category": "type",
+      "reason": "Nessun feed."
+    },
+    {
+      "name": "Sharp Type",
+      "url": "https://sharptype.co",
+      "category": "type",
+      "reason": "Richieste automatiche respinte (HTTP 429)."
+    },
+    {
+      "name": "Fontshare",
+      "url": "https://www.fontshare.com",
+      "category": "type",
+      "reason": "API pubblica funzionante ma catalogo fermo: il font più recente è stato inserito nel 2022."
+    },
+    {
+      "name": "Typographica",
+      "url": "https://typographica.org",
+      "category": "type",
+      "reason": "Feed attivo ma ultimo post giugno 2025."
+    },
+    {
+      "name": "Adobe Color Trends",
+      "url": "https://color.adobe.com/trends",
+      "category": "colour",
+      "reason": "Nessuna API pubblica. Le palette del feed sono estratte dalle immagini dei progetti."
+    },
+    {
+      "name": "Color Hunt",
+      "url": "https://colorhunt.co",
+      "category": "colour",
+      "reason": "Nessuna API pubblica."
+    },
+    {
+      "name": "Product Hunt Design tools",
+      "url": "https://www.producthunt.com/topics/design-tools",
+      "category": "tools",
+      "reason": "Feed funzionante ma senza immagini né voti, dominato da tool AI senza segnale di qualità: escluso dall'automatico."
+    },
+    {
+      "name": "Sidebar",
+      "url": "https://sidebar.io",
+      "category": "uiux",
+      "reason": "Feed funzionante ma sono link a saggi senza immagini: meglio lettura manuale."
+    },
+    {
+      "name": "Are.na",
+      "url": "https://www.are.na/explore",
+      "category": "artdirection",
+      "reason": "API v2 pubblica ma è curatela, non novità; la v3 richiede autenticazione."
+    },
+    {
+      "name": "Instagram / TikTok",
+      "url": "https://www.instagram.com",
+      "category": "artdirection",
+      "reason": "Instagram Basic Display API chiusa il 4 dicembre 2024; la ricerca per hashtag della Graph API richiede account Business/Creator e app review. Nessun accesso gratuito e automatizzabile verificato per TikTok."
+    },
+    {
+      "name": "CG Channel",
+      "url": "https://www.cgchannel.com",
+      "category": "3d",
+      "reason": "Il feed RSS risponde ma è fermo al 29 settembre 2024 (verificato il 25/09/2026). News 3D/VFX da controllare a mano."
+    }
+  ]
+}

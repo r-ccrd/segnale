@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Segnale</title>
+<meta name="description" content="What is happening in design right now: typefaces, identities, web, motion, colour. Updated automatically from public sources.">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Segnale">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></symbol>
+  <symbol id="i-hide" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c5 0 9 4.5 10 7-.4 1-1.2 2.3-2.4 3.5M6.2 6.3C4.1 7.6 2.6 9.7 2 12c1 2.5 5 7 10 7 1.8 0 3.4-.5 4.8-1.3M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+  <symbol id="i-focus" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></symbol>
+</svg>
+
+<a class="skip" href="#feed">Skip to the feed</a>
+
+<header class="top" id="top">
+  <div class="bar1">
+    <button class="wordmark" id="home" type="button" aria-label="Segnale, back to the top of the feed">Segnale</button>
+    <label class="search">
+      <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+      <span class="sr">Search</span>
+      <input id="q" type="search" placeholder="Search projects, studios, typefaces" autocomplete="off" spellcheck="false" enterkeyhint="search">
+    </label>
+    <nav class="views" aria-label="Views">
+      <button type="button" data-view="feed" aria-current="page">Feed</button>
+      <button type="button" data-view="trending">Trending</button>
+      <button type="button" data-view="saved">Saved<span class="count" id="savedCount"></span></button>
+    </nav>
+    <div class="tools">
+      <button type="button" class="icon" id="focusBtn" aria-label="Focus: one card at a time"><svg class="ic"><use href="#i-focus"/></svg></button>
+      <button type="button" class="icon" id="sourcesBtn" aria-label="Sources and preferences"><svg class="ic"><use href="#i-sliders"/></svg></button>
+    </div>
+  </div>
+  <div class="colourbar" id="colourbar"></div>
+  <div class="bar2" id="filters">
+    <div class="cats" id="cats" role="toolbar" aria-label="Categories"></div>
+    <div class="period" id="period" role="group" aria-label="Period">
+      <button type="button" data-p="1">24h</button>
+      <button type="button" data-p="7">7 days</button>
+      <button type="button" data-p="30">30 days</button>
+      <button type="button" data-p="0" aria-pressed="true">All</button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section id="feed" class="view" aria-label="Feed"></section>
+  <section id="trending" class="view" aria-label="Trending now" hidden></section>
+  <section id="saved" class="view" aria-label="Saved" hidden></section>
+  <div id="sentinel" aria-hidden="true"></div>
+  <p id="status" class="status" role="status"></p>
+</main>
+
+<dialog id="sheet" class="sheet"><div class="sheet-inner" id="sheetBody"></div></dialog>
+<dialog id="panel" class="panel" aria-label="Sources and preferences"><div id="panelBody"></div></dialog>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<noscript><p class="status">Segnale needs JavaScript to load the feed.</p></noscript>
+<script type="module" src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "Segnale",
+  "short_name": "Segnale",
+  "description": "What is happening in design right now: typefaces, identities, web, motion, colour.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["design", "news"],
+  "icons": [
+    {"src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "assets/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    {"src": "assets/icons/icon.svg", "sizes": "any", "type": "image/svg+xml"}
+  ]
+}
