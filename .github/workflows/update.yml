@@ -1,0 +1,62 @@
+# Segnale: legge le fonti 3 volte al giorno, salva i dati nel repo e pubblica il sito su GitHub Pages.
+# Costo: zero su repo pubblici (runner standard GitHub). Un giro dura in media pochi minuti.
+name: Aggiorna Segnale
+
+on:
+  schedule:
+    - cron: "23 5,12,19 * * *"   # UTC; minuto "strano" per evitare i picchi dell'ora piena
+  workflow_dispatch:              # pulsante "Run workflow" per un giro manuale
+  push:
+    branches: [main]
+    paths-ignore: ["data/**", "**.md", "docs/**"]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: segnale
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/requirements.txt
+
+      - name: Dipendenze
+        run: pip install -r pipeline/requirements.txt
+
+      - name: Leggi le fonti e aggiorna i dati
+        continue-on-error: true   # se una cosa si rompe, il sito resta online con i dati precedenti
+        run: python pipeline/build_feed.py
+
+      - name: Salva i dati nel repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "Nessun cambiamento nei dati"
+          else
+            git commit -m "data: $(date -u +'%Y-%m-%d %H:%M') UTC"
+            git push || (git pull --rebase && git push)
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4
