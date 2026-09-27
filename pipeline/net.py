@@ -20,9 +20,9 @@ import requests
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
 UA = (
-    f"SegnaleFeed/1.0 (+https://github.com/{REPO})"
+    f"DSGNBRD-feed/1.0 (+https://github.com/{REPO})"
     if REPO
-    else "SegnaleFeed/1.0 (personal design feed reader)"
+    else "DSGNBRD-feed/1.0 (personal design feed reader)"
 )
 TIMEOUT = 20
 

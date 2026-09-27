@@ -1,29 +1,61 @@
-# Segnale
+# DSGNBRD
 
-Cosa sta succedendo **ora** nel design: caratteri, identità, web, UI/UX, editoria, motion, 3D, colore, packaging, illustrazione, tool. Dashboard personale tipo Pinterest + rivista + radar dei trend, pensata per il tablet, a costo zero.
+Cosa sta succedendo **ora** nel design: caratteri, identità, web, UI/UX, editoria, motion, 3D, colore, packaging, illustrazione, tool. Dashboard personale tipo Pinterest + rivista + radar dei trend, pensata per il tablet, a costo zero. (Fino al 27/09/2026 si chiamava Segnale: il repo e l'indirizzo restano quelli.)
 
 - 42 fonti automatiche + 27 da controllare a mano, ognuna con il motivo: [docs/FONTI.md](docs/FONTI.md)
 - Aggiornamento automatico 3 volte al giorno con GitHub Actions, sito statico su GitHub Pages, installabile come app (PWA)
-- Nessuna immagine copiata: le card mostrano l'immagine dal server della fonte, sempre con link e attribuzione (Source → Nome)
+- Nessuna immagine copiata: le card mostrano l'immagine dal server della fonte; la scheda di ogni card riporta sempre fonte e link (Source → Nome)
 
-Stato al test del 25 settembre 2026 (due run della pipeline): 396 card reali + 39 card palette, 5 pattern rilevati, 41 fonti su 42 ok all'ultimo giro.
+## Aggiornare il sito che hai già online
 
-## Mettilo online in 3 passi
+Carica **solo il codice**. La cartella `data/` sul tuo repo la scrive il bot tre volte al giorno ed è più recente di quella nello zip: non sovrascriverla.
 
-1. **Carica tutto in un repo pubblico** (pubblico = Actions gratis):
+**Dal sito di GitHub (computer):**
+1. Estrai lo zip.
+2. Nel tuo repo: **Add file → Upload files**, poi trascina dalla cartella estratta: `index.html`, `manifest.webmanifest`, `sw.js`, `README.md` e le cartelle `assets`, `pipeline`, `docs`. **Non** trascinare `data`.
+3. In basso **Commit changes** (lascia "Commit directly to the main branch").
+4. Il commit fa partire da solo "Aggiorna DSGNBRD" (tab Actions): in 4-6 minuti il sito è aggiornato e la pipeline aggiunge i riassunti brevi a tutte le card. Fino a quel giro le card mostrano il titolo intero.
+5. Facoltativo: `assets/icons/icon.svg` non serve più, puoi cancellarlo. Il file `.github/workflows/update.yml` è cambiato solo nel nome del workflow: puoi lasciare quello vecchio.
+
+**Con git:**
+```bash
+git pull                      # prima prendi i dati nuovi del bot
+# copia sopra i file nuovi, tutto tranne data/
+git add -A && git commit -m "DSGNBRD: redesign" && git push
+```
+
+Sul tablet la prima apertura dopo l'aggiornamento può mostrare ancora la versione vecchia (il service worker la tiene per l'offline); alla seconda apertura arriva la nuova, oppure compare l'avviso "DSGNBRD was updated → Refresh". Nome e icona dell'app già installata di solito si aggiornano entro qualche giorno (Chrome ricontrolla il manifest quando apri l'app e può chiederti di confermare il cambio); se restano quelli vecchi, disinstalla e reinstalla dal browser.
+
+## Metterlo online da zero (3 passi)
+
+1. **Carica tutto in un repo pubblico** (pubblico = Actions gratis). Con l'upload dal sito: `.github/` e `.nojekyll` sono file nascosti, senza `.github/workflows/update.yml` non parte niente.
    ```bash
    cd segnale
-   git init -b main && git add . && git commit -m "Segnale"
+   git init -b main && git add . && git commit -m "DSGNBRD"
    git remote add origin https://github.com/TUO-UTENTE/segnale.git
    git push -u origin main
    ```
-   Se usi l'upload dal sito di GitHub: `.github/` e `.nojekyll` sono nascosti nel Finder. Senza `.github/workflows/update.yml` non parte niente.
 2. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
-3. **Actions → "Aggiorna Segnale" → Run workflow.** In 4-6 minuti il sito è su `https://TUO-UTENTE.github.io/segnale/`.
+3. **Actions → "Aggiorna DSGNBRD" → Run workflow.** In 4-6 minuti il sito è su `https://TUO-UTENTE.github.io/segnale/`.
 
-Sul tablet: apri il link in Safari (iPad) o Chrome (Android) → Condividi → **Aggiungi alla schermata Home**. Si apre a tutto schermo e offline mostra l'ultimo feed scaricato.
+Giri automatici alle 05:23, 12:23 e 19:23 UTC (07:23, 14:23, 21:23 in Italia con l'ora legale). GitHub dichiara che i job programmati possono partire in ritardo nei momenti di carico.
 
-Poi va da solo: giri alle 05:23, 12:23 e 19:23 UTC (07:23, 14:23, 21:23 in Italia con l'ora legale, un'ora prima d'inverno). GitHub dichiara che i job programmati possono partire in ritardo nei momenti di carico.
+## Come si usa
+
+- **Categorie**: la linguetta **›** sul bordo sinistro. *Tieni premuto*, la ruota si apre sotto il dito; scorri verso la voce e **rilascia**: si apre quella categoria. Vicino ai bordi dell'arco la ruota gira da sola e mostra le voci nascoste. Rilasciare al centro annulla. *Tocco breve*: la ruota resta aperta, la giri trascinando e tocchi la voce. Da tastiera: Invio sulla linguetta, frecce, Invio. La categoria attiva compare sulla linguetta e in alto a sinistra (tocca la × per tornare a tutto).
+- **Card**: foto + riassunto (soggetto e tipo, per esempio "Granola, Identity by Ragged Edge"). Tocca per aprire la scheda con titolo intero, data, perché è qui, palette HEX/RGB/HSL, fonte e link all'originale.
+- **Salvare**: *pressione lunga* su una card (la card si stringe, rilascia quando fa "pop"), oppure Save nella scheda. Le card salvate hanno un segnalibro pieno. Undo nel messaggio in basso.
+- **Notte e giorno**: icona luna/sole in alto a sinistra. Notte: fondo charcoal `#232220`, testo crema `#E9E0D2`; giorno: gli stessi due colori scambiati. Nel pannello (icona cursori) c'è anche *Auto*, che segue il tema del sistema. Tutti i colori sono all'inizio di `assets/app.css`.
+- **Trending**: sezioni separate con titoli grandi (Patterns, Colour, Typefaces, New on Google Fonts, Covered everywhere, In the conversation, Consolidated) e una fila di scorciatoie in alto per saltare alla sezione.
+- **Altro**: ricerca con la lente (o `/`), periodo 24h / 7 days / 30 days / All, Focus (una card per volta), tastiera nella scheda: `←` `→` scorrono, `s` salva, `o` apre l'originale, `Esc` chiude. Swipe sull'immagine per passare alla card dopo.
+
+Animazioni: tutte brevi e legate a un gesto (pressione, comparsa delle card allo scroll, header che si nasconde scendendo e il nome che si stringe, apertura della ruota e delle schede, scambio notte/giorno). Con "riduci animazioni" attivo nel sistema si spengono tutte.
+
+## Sul tablet Android
+
+**Via consigliata: gratis, niente file da gestire.** Apri il sito in Chrome e tocca l'icona di installazione in alto oppure menu ⋮ → *Installa app* (Samsung Internet: menu → *Aggiungi pagina a* → *Schermata Home*). Chrome crea un'app vera (WebAPK): icona nel drawer, finestra sua, si apre offline con l'ultimo feed scaricato. Tenendo premuta l'icona hai le scorciatoie per Trending e Saved.
+
+**Se vuoi proprio il file `.apk`** (Trusted Web Activity, stesso motore di Chrome): su [pwabuilder.com](https://www.pwabuilder.com) incolli l'indirizzo del sito → *Package for stores* → *Android*; pubblichi il file `assetlinks.json` in `https://TUO-UTENTE.github.io/.well-known/assetlinks.json` (repo speciale `TUO-UTENTE.github.io`) per togliere la barra dell'indirizzo; copi l'APK sul tablet e lo installi. Conserva la chiave di firma. Verifica sviluppatori Android (controllato il 25/09/2026): dal 30 settembre 2026 in Brasile, Indonesia, Singapore e Thailandia, nel resto del mondo dal 2027; un APK non registrato resta installabile con adb o con il flusso avanzato (attesa obbligatoria di 24 ore). Il Play Store chiede 25 $ una tantum, quindi esce dal costo zero.
 
 ## Provarlo sul computer
 
@@ -42,23 +74,23 @@ python3 pipeline/build_feed.py --only brandnew,tbi --dry-run   # solo due fonti,
 
 ## Come funziona
 
-FONTI → NORMALIZZAZIONE → QUALITY GATE → DEDUP → ARRICCHIMENTO → CLASSIFICAZIONE → CLUSTER → RANKING → TREND → JSON → APP
+FONTI → NORMALIZZAZIONE → QUALITY GATE → DEDUP → ARRICCHIMENTO → CLASSIFICAZIONE → CLUSTER → RANKING → TREND → RIASSUNTI → JSON → APP
 
 | Fase | Cosa fa |
 |---|---|
-| Fonti | `pipeline/sources.json`: feed RSS/Atom, 3 page watcher (Brand New, The Brand Identity e Fonts In Use hanno il feed rotto o assente) e i metadati pubblici di Google Fonts (1.946 famiglie). |
+| Fonti | `pipeline/sources.json`: feed RSS/Atom, 3 page watcher (Brand New, The Brand Identity e Fonts In Use hanno il feed rotto o assente) e i metadati pubblici di Google Fonts. |
 | Perché non nel browser | Dei feed funzionanti nessuno manda header CORS: il browser non può leggerli. Li legge GitHub Actions e scrive JSON statici. |
-| Normalizzazione | URL canonico (via utm e simili), titolo e testo puliti, data con il suo tipo. |
-| Date | Mai inventate. Priorità: rilascio ufficiale (es. Google Fonts) > progetto > articolo > prima rilevazione. Ogni scheda dice quale data sta usando. Typewolf non dà date: le sue card dicono "First seen by Segnale". |
-| Quality gate | Fuori annunci, sponsor, contest, offerte di lavoro, gift guide, roundup e simili (32 scarti al primo run). |
+| Date | Mai inventate. Priorità: rilascio ufficiale > progetto > articolo > prima rilevazione. La scheda dice quale data sta usando. |
+| Quality gate | Fuori annunci, sponsor, contest, offerte di lavoro, gift guide, roundup e simili. |
 | Dedup | Stesso URL canonico = stesso item. Stesso progetto su fonti diverse (titolo simile o stessa immagine entro 21 giorni) = una card sola con "Also covered by". |
 | Arricchimento | Se il feed non ha immagine o testo si legge og:meta dalla pagina. L'immagine viene analizzata in memoria (dimensioni + palette) e buttata: niente viene salvato o ripubblicato. |
 | Classificazione | Regole testuali per categoria + categoria di default della fonte. Font riconosciuti sul catalogo Google Fonts e sui crediti di Fonts In Use e Typewolf. |
-| Output | `data/archive/AAAA-MM.json` (un item per riga, diff git leggibili), `data/index.json` (fonti, stato, trend, segnali, barra colore), `data/state.json` (cache ETag, URL già visti, prima rilevazione dei trend). Retention 120 giorni. |
+| Riassunti | `pipeline/describe.py`: regole fisse, niente AI e niente costi. Dal titolo estrae soggetto e tipo ("Ragged Edge creates refreshingly wholesome identity for AI notepad Granola" → "Granola", "Identity by Ragged Edge"). Ricalcolati a ogni giro su tutto l'archivio, quindi le regole migliorate valgono anche per le card vecchie. |
+| Output | `data/archive/AAAA-MM.json` (un item per riga, diff git leggibili), `data/index.json` (fonti, stato, trend, segnali), `data/state.json` (cache ETag, URL già visti, prima rilevazione dei trend). Retention 120 giorni. |
 
 ### Rilevanza (0-100, niente like né follower)
 
-Calcolata in `pipeline/rank.py` solo da fatti verificabili, e ogni card mostra il perché ("Why it is here"):
+Calcolata in `pipeline/rank.py` solo da fatti verificabili; la scheda di ogni card mostra il perché ("Why it is here"):
 
 - base 18 + 42 × peso della fonte (0-1, qualità della curatela)
 - +10 riconoscimento esplicito (Awwwards Site of the Day, FWA of the Day, Typewolf Site of the Day…)
@@ -75,20 +107,18 @@ Finestra recente: ultimi 14 giorni. Confronto: i 76 giorni prima (15-90). Materi
 | Etichetta | Quando |
 |---|---|
 | **Emerging pattern** | Senza baseline: almeno 4 item da 3 fonti indipendenti (ricorrenza, non crescita). Con baseline: almeno 3 item da 2 fonti e frequenza ≥ 1,4× rispetto alle settimane prima. |
-| **Detected trend** | Serve la baseline: almeno 4 item da 3 fonti e frequenza ≥ 2×. Eccezione: un carattere uscito di recente su Google Fonts che compare in 3+ progetti di 2+ fonti (prima non esisteva, quindi la crescita è misurabile). |
+| **Detected trend** | Serve la baseline: almeno 4 item da 3 fonti e frequenza ≥ 2×. Eccezione: un carattere uscito di recente su Google Fonts che compare in 3+ progetti di 2+ fonti. |
 | **Consolidated** | Presente in modo stabile in entrambe le finestre: c'è, ma non è nuovo. |
 
-La baseline vale solo con almeno 21 giorni di osservazione propria (più 40 giorni di storico e 60 item). Motivo: i feed espongono solo gli ultimi N articoli, quindi confrontare oggi con l'arretrato dei feed gonfierebbe qualsiasi "crescita". Nelle prime tre settimane quindi niente "Detected trend" da pattern, e i colori restano conteggi nel tab Trending: un arancio smorzato frequente è pelle, legno, cartone (tasso di base), non una moda.
+La baseline vale solo con almeno 21 giorni di osservazione propria (più 40 giorni di storico e 60 item): i feed espongono solo gli ultimi N articoli, quindi confrontare oggi con l'arretrato dei feed gonfierebbe qualsiasi "crescita". Nelle prime tre settimane niente "Detected trend" da pattern, e i colori restano conteggi nel Trending.
 
 ### Personalizzazione (solo su questo dispositivo, `localStorage`)
 
 - Salva (+1), apri l'originale (+0,5), apri una card (+0,2), nascondi (−1): pesi per categoria e, ridotti, per fonte, limitati a ±6.
-- In All ogni card vale: rilevanza + 4 × peso categoria + 3 × peso fonte + preferenza (More +12, Less −15, Off = sparisce). Sotto 26 non compare. Scegliendo una categoria dalla barra vedi sempre tutto.
-- Pallino ciano = arrivato dopo la tua ultima visita.
-- Pannello Sources: preferenze per categoria, pesi imparati (con reset), fonti on/off, elementi nascosti.
-- Tab Saved: Export / Import in JSON per spostare salvati e preferenze tra dispositivi.
-
-Viste: Feed (giorni con card principale, una fascia trend e masonry), Trending, Saved, Focus (icona con gli angoli: una card per volta). Tastiera: `/` cerca, `←` `→` scorrono, `s` salva, `o` apre l'originale, `Esc` chiude. Su touch: swipe sull'immagine.
+- In All ogni card vale: rilevanza + 4 × peso categoria + 3 × peso fonte + preferenza (More +12, Less −15, Off = sparisce). Sotto 26 non compare. Scegliendo una categoria dalla ruota vedi sempre tutto.
+- L'intestazione di ogni giorno dice quante card sono arrivate dopo la tua ultima visita.
+- Pannello (icona cursori): tema, preferenze per categoria, pesi imparati (con reset), fonti on/off, elementi nascosti.
+- Tab Saved: Export / Import in JSON per spostare salvati e preferenze tra dispositivi. I salvati fatti con il vecchio nome restano.
 
 ## Struttura
 
@@ -97,8 +127,8 @@ segnale/
 ├── index.html · manifest.webmanifest · sw.js · .nojekyll
 ├── assets/        app.css · app.js · icons/
 ├── data/          index.json · state.json · archive/AAAA-MM.json
-├── pipeline/      build_feed.py (orchestratore) · net.py · ingest.py · enrich.py
-│                  classify.py · rank.py · trends.py · sources.json · requirements.txt
+├── pipeline/      build_feed.py (orchestratore) · net.py · ingest.py · enrich.py · classify.py
+│                  rank.py · trends.py · describe.py · sources.json · requirements.txt
 ├── docs/FONTI.md  audit delle fonti del 25/09/2026
 └── .github/workflows/update.yml
 ```
@@ -114,20 +144,22 @@ In `pipeline/sources.json`, dentro `sources`:
 
 ## Limiti, detti chiari
 
-- **Fonti che bloccano**: al run delle 13:11 UTC The Dieline ha risposto 403 (al mattino funzionava), al run delle 14:10 magCulture ha risposto 429. CG Channel ha il feed fermo al 29/09/2024: disattivato e spostato tra le manuali. Dribbble, CSSDA, Collater.al, Siteinspire, Sharp Type, Design Week, Creative Review, Codrops e altri stanno tra le manuali con il motivo. Il pannello Sources mostra sempre l'errore dell'ultimo giro.
-- **Immagini in hotlink**: se una fonte cambia URL o blocca l'hotlink, la card passa a una copertina generata (palette + titolo). Test con tutte le immagini esterne bloccate: zero immagini rotte a schermo.
+- **Gesto Indietro di Android**: la linguetta sta sul bordo sinistro, dove Android ascolta lo swipe "Indietro". Tieni premuto un attimo prima di trascinare (la ruota si apre dopo circa un quarto di secondo): se trascini subito dal bordo, il sistema può prendere il gesto come Indietro. In alternativa usa il tocco breve.
+- **Riassunti**: sui dati del 25/09, 267 card su 394 (68%) hanno un soggetto estratto da una regola; le altre 127 (32%, soprattutto interviste, saggi e articoli senza un progetto preciso) tengono il titolo, accorciato a un confine naturale della frase. Una regola può sbagliare soggetto: il titolo intero è sempre nella scheda.
+- **Fonti che bloccano**: al run del 25/09 The Dieline ha risposto 403 e magCulture 429; CG Channel ha il feed fermo dal 2024 ed è tra le manuali. Il pannello mostra sempre l'errore dell'ultimo giro.
+- **Immagini in hotlink**: se una fonte blocca l'immagine, la card mostra un campo del colore dominante con la palette. Test con tutte le immagini esterne bloccate: zero immagini rotte a schermo.
 - **Page watcher**: dipendono dall'HTML di tre siti; se cambiano markup, quella fonte va in errore finché non si aggiorna il selettore in `ingest.py`.
-- **Google Fonts**: `fonts.google.com/metadata/fonts` è pubblico e lo usa il sito di Google, ma non è un'API documentata. L'alternativa documentata (Developer API) chiede una API key gratuita.
-- **Dati personali**: salvati e preferenze vivono nel browser. Safari e l'app in Home possono avere memorie separate: usa sempre l'icona in Home e fai un Export ogni tanto.
-- **Crescita del repo**: `data/` pesa ~0,6 MB (retention 120 giorni). Ogni giro riscrive index.json, state.json e il mese corrente: ~110 KB compressi a commit, quindi al massimo ~120 MB l'anno prima della compressione delta di git (in pratica molto meno). GitHub consiglia repo sotto 1 GB.
-- **Regola dei 60 giorni**: GitHub sospende i workflow programmati dopo 60 giorni senza attività nel repo. I commit automatici dei dati contano come attività; se un giorno lo trovi sospeso, riattivalo dal tab Actions.
-- **Versioni delle action** (checkout@v4, setup-python@v5, configure-pages@v5, upload-pages-artifact@v3, deploy-pages@v4): non ricontrollate oggi. Se GitHub mostra un avviso di deprecazione, alza il numero di versione.
-- **Costi**: Actions gratis sui repo pubblici con runner standard; un giro dura 3-4 minuti. Pages ha limiti pubblicati (sito fino a 1 GB, banda "soft" 100 GB al mese) lontanissimi da questi numeri.
+- **Google Fonts**: `fonts.google.com/metadata/fonts` è pubblico e lo usa il sito di Google, ma non è un'API documentata.
+- **Dati personali**: salvati e preferenze vivono nel browser. Il browser e l'app installata possono avere memorie separate: usa sempre l'app e fai un Export ogni tanto.
+- **Crescita del repo**: `data/` pesa ~0,6 MB (retention 120 giorni). GitHub consiglia repo sotto 1 GB.
+- **Regola dei 60 giorni**: GitHub sospende i workflow programmati dopo 60 giorni senza attività nel repo. I commit automatici dei dati contano come attività; se lo trovi sospeso, riattivalo dal tab Actions.
+- **Versioni delle action** (checkout@v4, setup-python@v5, configure-pages@v5, upload-pages-artifact@v3, deploy-pages@v4): se GitHub mostra un avviso di deprecazione, alza il numero di versione.
+- **Costi**: Actions gratis sui repo pubblici con runner standard; un giro dura 3-4 minuti.
 
-## Test eseguiti (25/09/2026, Chromium con Playwright)
+## Test eseguiti (27/09/2026, Chromium con Playwright)
 
-Viewport: desktop 1440×900, iPad verticale 834×1194, iPad orizzontale 1194×834, mobile 390×844. Nessun errore JavaScript, nessuno scroll orizzontale, prima card in 0,3-0,5 s in locale.
+Viewport: desktop 1440×900, tablet grande 1730×1080, iPad orizzontale 1194×834, iPad verticale 834×1194, telefono 390×844. Su tutti: nome centrato al pixel, nessuna sovrapposizione nell'header, nessuno scroll orizzontale, nessun errore JavaScript, nessuna card con fonte/ora/segnalibro vuoto nella didascalia, barra colori e barra categorie assenti.
 
-19/19 test funzionali: niente card duplicate, niente duplicati da cluster, infinite scroll, filtri (Typography, Colour, Trend alerts), periodo 24h, ricerca + stato vuoto, dettaglio con navigazione da tastiera, link all'originale, salvataggio che sopravvive al reload, vista Trending, mute di una fonte, nascondi + apprendimento, focus visibile, funzionamento offline dopo la prima visita, skeleton con dati lenti, copertine con immagini bloccate, reduced motion.
+38/38 test funzionali: ruota con gesto reale tieni-trascina-rilascia, ruota che scorre da sola fino a una voce nascosta ("Trend alerts"), rilascio al centro che annulla, tocco breve con rotazione trascinando, tastiera, Esc, gesto touch simulato, tocco su telefono, filtro rimosso dalla ×, niente duplicati, infinite scroll, comparsa allo scroll, header che si nasconde e ritorna, periodo 24h, ricerca e chiusura, scheda con navigazione e attribuzione, link all'originale, salvataggio con `s` e con pressione lunga (senza aprire la scheda), persistenza dopo il reload, linguetta nascosta fuori dal feed, Trending con sezioni piene e titoli grandi, scorciatoie di sezione, tema notte/giorno che resta dopo il reload, tema chiaro di sistema, mute di una fonte, nascondi + apprendimento, focus visibile, offline dopo la prima visita, skeleton con dati lenti, copertine con immagini bloccate, riduci animazioni.
 
-Revisione dopo il primo giro di test: le fasce trend occupavano tutta la prima schermata (ora una al giorno, le altre come card nel masonry); testo "null" nella scheda; scorciatoie da tastiera che smettevano di funzionare dopo "Next"; colori comuni etichettati come trend senza baseline (tolti); feed di CG Channel fermo dal 2024 (disattivato); un giorno pieno di Site of the Day tutti di fila (ora il feed mescola fonti e categorie dentro ogni giorno).
+Revisione dopo il primo giro: in modalità tastiera il focus non arrivava sulle voci della ruota (erano nascoste durante l'animazione di apertura); la copertina di riserva ripeteva il titolo già presente nella didascalia; i nomi lunghi dei font si spezzavano a metà parola nel Trending; su iPad in verticale la linguetta copriva il bordo delle card.

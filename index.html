@@ -1,25 +1,36 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="night">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Segnale</title>
+<title>DSGNBRD</title>
 <meta name="description" content="What is happening in design right now: typefaces, identities, web, motion, colour. Updated automatically from public sources.">
-<meta name="theme-color" content="#000000">
-<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#232220">
+<meta name="color-scheme" content="dark light">
+<script>
+  /* tema prima del primo paint: niente lampo di colore sbagliato */
+  (function () {
+    var pref = 'system';
+    try { var v = localStorage.getItem('dsgnbrd:theme'); if (v) pref = JSON.parse(v); } catch (e) {}
+    var t = pref === 'day' || pref === 'night' ? pref : (matchMedia('(prefers-color-scheme: light)').matches ? 'day' : 'night');
+    document.documentElement.setAttribute('data-theme', t);
+    var m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.setAttribute('content', t === 'day' ? '#e9e0d2' : '#232220');
+  })();
+</script>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/icons/favicon-48.png" type="image/png">
 <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="Segnale">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DSGNBRD">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
 <link rel="stylesheet" href="assets/app.css">
 </head>
-<body>
+<body class="v-feed">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></symbol>
   <symbol id="i-save" viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/></symbol>
@@ -32,39 +43,62 @@
   <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
   <symbol id="i-focus" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-install" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.2A7.8 7.8 0 0 1 9.8 4.5a7.8 7.8 0 1 0 9.7 9.7z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></symbol>
 </svg>
 
-<a class="skip" href="#feed">Skip to the feed</a>
+<a class="skip" href="#main">Skip to the feed</a>
 
 <header class="top" id="top">
-  <div class="bar1">
-    <button class="wordmark" id="home" type="button" aria-label="Segnale, back to the top of the feed">Segnale</button>
-    <label class="search">
-      <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
-      <span class="sr">Search</span>
-      <input id="q" type="search" placeholder="Search projects, studios, typefaces" autocomplete="off" spellcheck="false" enterkeyhint="search">
-    </label>
-    <nav class="views" aria-label="Views">
-      <button type="button" data-view="feed" aria-current="page">Feed</button>
-      <button type="button" data-view="trending">Trending</button>
-      <button type="button" data-view="saved">Saved<span class="count" id="savedCount"></span></button>
-    </nav>
-    <div class="tools">
-      <button type="button" class="icon" id="focusBtn" aria-label="Focus: one card at a time"><svg class="ic"><use href="#i-focus"/></svg></button>
-      <button type="button" class="icon" id="sourcesBtn" aria-label="Sources and preferences"><svg class="ic"><use href="#i-sliders"/></svg></button>
+  <div class="hgrid">
+    <div class="hleft">
+      <button type="button" class="icon" id="searchBtn" aria-label="Search" aria-expanded="false" aria-controls="searchbox"><svg class="ic"><use href="#i-search"/></svg></button>
+      <button type="button" class="icon" id="themeBtn" aria-label="Switch to day mode"><span class="theme-ic" aria-hidden="true"><svg class="ic moon"><use href="#i-moon"/></svg><svg class="ic sun"><use href="#i-sun"/></svg></span></button>
     </div>
-  </div>
-  <div class="colourbar" id="colourbar"></div>
-  <div class="bar2" id="filters">
-    <div class="cats" id="cats" role="toolbar" aria-label="Categories"></div>
-    <div class="period" id="period" role="group" aria-label="Period">
-      <button type="button" data-p="1">24h</button>
-      <button type="button" data-p="7">7 days</button>
-      <button type="button" data-p="30">30 days</button>
-      <button type="button" data-p="0" aria-pressed="true">All</button>
+    <button class="wordmark" id="home" type="button" aria-label="DSGNBRD, back to the top of the feed">DSGNBRD</button>
+    <div class="hright">
+      <nav class="views" aria-label="Views">
+        <button type="button" data-view="feed" aria-current="page">Feed</button>
+        <button type="button" data-view="trending">Trending</button>
+        <button type="button" data-view="saved">Saved<span class="count" id="savedCount"></span></button>
+      </nav>
+      <div class="tools">
+        <button type="button" class="icon" id="installBtn" aria-label="Install DSGNBRD as an app" hidden><svg class="ic"><use href="#i-install"/></svg></button>
+        <button type="button" class="icon" id="focusBtn" aria-label="Focus: one item at a time"><svg class="ic"><use href="#i-focus"/></svg></button>
+        <button type="button" class="icon" id="sourcesBtn" aria-label="Sources and preferences"><svg class="ic"><use href="#i-sliders"/></svg></button>
+      </div>
+    </div>
+    <div class="row2" id="filters">
+      <button type="button" class="chip" id="catChip" hidden><span class="t"></span><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button>
+      <div class="period" id="period" role="group" aria-label="Period">
+        <button type="button" data-p="1">24h</button>
+        <button type="button" data-p="7">7 days</button>
+        <button type="button" data-p="30">30 days</button>
+        <button type="button" data-p="0" aria-pressed="true">All</button>
+      </div>
+    </div>
+    <div class="searchbox" id="searchbox">
+      <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+      <label class="sr" for="q">Search</label>
+      <input id="q" type="search" placeholder="Search projects, studios, typefaces" autocomplete="off" spellcheck="false" enterkeyhint="search">
+      <button type="button" class="icon" id="searchClose" aria-label="Clear and close search"><svg class="ic"><use href="#i-close"/></svg></button>
     </div>
   </div>
 </header>
+
+<button type="button" class="handle" id="catHandle" aria-haspopup="menu" aria-expanded="false" aria-controls="wheel" aria-label="Categories, showing everything. Hold and slide to choose, or press to open the wheel.">
+  <svg class="ic" aria-hidden="true"><use href="#i-next"/></svg><span class="lbl" id="catLbl"></span>
+</button>
+<div class="hint" id="wheelHint" hidden>Hold, then slide to pick a category</div>
+<div class="wheel" id="wheel" role="menu" aria-label="Categories" hidden>
+  <div class="scrim"></div>
+  <div class="disc"></div>
+  <svg class="ring" aria-hidden="true"></svg>
+  <div class="needle" aria-hidden="true"></div>
+  <div class="hub" aria-hidden="true"></div>
+  <div class="spokes"></div>
+</div>
 
 <main id="main">
   <section id="feed" class="view" aria-label="Feed"></section>
@@ -78,7 +112,7 @@
 <dialog id="panel" class="panel" aria-label="Sources and preferences"><div id="panelBody"></div></dialog>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-<noscript><p class="status">Segnale needs JavaScript to load the feed.</p></noscript>
+<noscript><p class="status">DSGNBRD needs JavaScript to load the feed.</p></noscript>
 <script type="module" src="assets/app.js"></script>
 </body>
 </html>

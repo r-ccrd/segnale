@@ -1,6 +1,6 @@
-# Fonti di Segnale
+# Fonti di DSGNBRD
 
-Verifica del **25 settembre 2026**, fatta con richieste HTTP reali (User-Agent `SegnaleFeed/1.0`) da un container Linux. Le colonne *Ultimo run* vengono dal secondo run della pipeline dello stesso giorno. Lo stato aggiornato di ogni fonte lo trovi sempre nel pannello **Sources** dell'app.
+Verifica del **25 settembre 2026**, fatta con richieste HTTP reali (User-Agent `SegnaleFeed/1.0`, il nome di allora) da un container Linux. Le colonne *Ultimo run* vengono dal secondo run della pipeline dello stesso giorno. Lo stato aggiornato di ogni fonte lo trovi sempre nel pannello **Sources** dell'app.
 
 Candidati testati: **92**. Con un feed utilizzabile: **58**. Feed funzionanti che mandano header CORS: **3** (per questo i feed li legge GitHub Actions e non il browser).
 

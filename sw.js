@@ -1,16 +1,19 @@
-/* Segnale service worker
+/* DSGNBRD service worker
    - app shell: stale-while-revalidate (si apre offline, si aggiorna al giro dopo)
    - data/*.json: network-first con copia di riserva (offline vedi l'ultimo feed scaricato)
-   - Google Fonts: cache-first solo per il CSS di Archivo e i file .woff2
+   - Google Fonts: cache-first solo per il CSS di Archivo e i file dei font
    - immagini dei progetti: NON in cache (restano sui server delle fonti) */
-const VERSION = 'segnale-v1';
-const DATA = 'segnale-data';
-const FONTS = 'segnale-fonts';
+const VERSION = 'dsgnbrd-shell-2';
+const DATA = 'dsgnbrd-data';
+const FONTS = 'dsgnbrd-fonts';
 const SHELL = ['./', './index.html', './assets/app.css', './assets/app.js', './manifest.webmanifest',
-  './assets/icons/icon.svg', './assets/icons/icon-192.png', './assets/icons/icon-512.png'];
+  './assets/icons/favicon-48.png', './assets/icons/icon-192.png', './assets/icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' = prende i file nuovi dal server, non dalla cache HTTP del browser
+  e.waitUntil(caches.open(VERSION)
+    .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()

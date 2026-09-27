@@ -1,4 +1,4 @@
-/* Segnale · frontend (vanilla JS, nessuna dipendenza).
+/* DSGNBRD · frontend (vanilla JS, nessuna dipendenza).
    Dati: data/index.json + data/archive/YYYY-MM.json, scritti dalla pipeline (GitHub Actions).
    Preferenze e salvati: localStorage, solo su questo dispositivo (export/import nel tab Saved). */
 
@@ -6,6 +6,13 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const SVGNS = 'http://www.w3.org/2000/svg';
 
+function put(el, ...kids) {
+  for (const kid of kids.flat(Infinity)) {
+    if (kid == null || kid === false || kid === '') continue;
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
 function h(tag, props, ...kids) {
   const el = document.createElement(tag);
   if (props) {
@@ -18,11 +25,7 @@ function h(tag, props, ...kids) {
       else el.setAttribute(k, v === true ? '' : String(v));
     }
   }
-  for (const kid of kids.flat(Infinity)) {
-    if (kid == null || kid === false || kid === '') continue;
-    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
-  }
-  return el;
+  return put(el, kids);
 }
 function icon(id) {
   const s = document.createElementNS(SVGNS, 'svg');
@@ -33,15 +36,25 @@ function icon(id) {
   s.append(u);
   return s;
 }
-function put(el, ...kids) { el.append(...kids.flat(Infinity).filter((k) => k != null && k !== false && k !== '')); return el; }
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
-const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const cap1 = (s) => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
+const motionOK = () => !matchMedia('(prefers-reduced-motion: reduce)').matches;
+function buzz(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch { /* non supportato */ } }
+function restart(el, cls) { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
 
+// localStorage con prefisso nuovo; legge anche le chiavi del vecchio nome, così salvati e preferenze non si perdono
 const store = {
-  get(k, d) { try { const v = localStorage.getItem('segnale:' + k); return v ? JSON.parse(v) : d; } catch { return d; } },
-  set(k, v) { try { localStorage.setItem('segnale:' + k, JSON.stringify(v)); } catch { /* quota o modalità privata */ } },
+  get(k, d) {
+    try {
+      let v = localStorage.getItem('dsgnbrd:' + k);
+      if (v == null) v = localStorage.getItem('segnale:' + k);
+      return v == null ? d : JSON.parse(v);
+    } catch { return d; }
+  },
+  set(k, v) { try { localStorage.setItem('dsgnbrd:' + k, JSON.stringify(v)); } catch { /* quota o modalità privata */ } },
 };
 
 const CATS = [
@@ -56,11 +69,11 @@ const FLOOR = 26; // soglia di qualità nella vista All (si sposta con le prefer
 
 const S = {
   index: null, items: [], byId: new Map(), trendItems: [], months: [], loaded: new Set(), loading: false,
-  view: 'feed', cat: 'all', period: 0, q: '',
+  view: 'feed', cat: 'all', period: 0, q: '', themePref: 'system',
   saved: store.get('saved', {}), hidden: new Set(store.get('hidden', [])), muted: new Set(store.get('muted', [])),
   prefs: store.get('prefs', {}), aff: store.get('aff', { cat: {}, src: {} }),
   since: null, srcNames: {}, groups: [], gi: 0, blocks: new Map(), renderedIds: new Set(), savedBlk: null,
-  dlist: [], didx: 0, checkedAt: Date.now(),
+  dlist: [], didx: 0, checkedAt: Date.now(), dirty: false, wheel: null,
 };
 
 const feedEl = $('#feed');
@@ -104,29 +117,39 @@ function rel(iso) {
 function dateLine(it) {
   const d = fullDate(it.date);
   const s = srcName(it.sid);
-  if (it.type === 'trend') return 'First detected by Segnale on ' + d;
+  if (it.type === 'trend') return 'First detected by DSGNBRD on ' + fullDate(it.firstDetected || it.date);
   switch (it.dateType) {
     case 'release': return (it.sid === 'googlefonts' ? 'Released on Google Fonts on ' : 'Released on ') + d;
     case 'project': return `Project published on ${d}, via ${s}`;
-    case 'detected': return `First seen by Segnale on ${d}. ${s} gives no publication date.`;
+    case 'detected': return `First seen by DSGNBRD on ${d}. ${s} gives no publication date.`;
     default: return `Published by ${s} on ${d}`;
   }
 }
 
-// ───────────────────────────────────────────── helpers
-const srcName = (sid) => S.srcNames[sid] || sid;
+// ───────────────────────────────────────────── helper
+const srcName = (sid) => S.srcNames[sid] || sid || '';
 const isNew = (it) => !!(S.since && it.seen && Date.parse(it.seen) > S.since);
 function eff(it) {
   if (it.type === 'trend') return 90;
   const a = S.aff;
   return (it.score || 0) + 4 * (a.cat[it.category] || 0) + 3 * (a.src[it.sid] || 0) + (PREF_BOOST[S.prefs[it.category]] || 0);
 }
+// descrizione breve: soggetto + tipo (calcolata dalla pipeline); il titolo intero resta nella scheda
+function shortOf(it) {
+  if (it.type === 'trend') return { s: it.title, k: it.label };
+  if (it.short && it.short.s) return it.short;
+  return { s: it.title, k: CAT_LABEL[it.category] || '' };
+}
 function hay(it) {
   if (!it._h) {
-    it._h = norm([it.title, it.summary, it.author, (it.tags || []).join(' '), (it.fonts || []).join(' '),
+    const sh = it.short || {};
+    it._h = norm([it.title, sh.s, sh.k, it.summary, it.author, (it.tags || []).join(' '), (it.fonts || []).join(' '),
       srcName(it.sid), CAT_LABEL[it.category], it.matched, it.font && it.font.family].join(' '));
   }
   return it._h;
+}
+function findItem(id) {
+  return S.byId.get(id) || S.trendItems.find((t) => t.id === id) || S.saved[id] || null;
 }
 function hexRgb(hex) { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
 function rgbHsl([r, g, b]) {
@@ -141,7 +164,7 @@ function rgbHsl([r, g, b]) {
   }
   return [Math.round(hh), Math.round(s * 100), Math.round(l * 100)];
 }
-function inkOn(hex) { const [r, g, b] = hexRgb(hex); return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.58 ? '#000000' : '#f2f1ec'; }
+function inkOn(hex) { const [r, g, b] = hexRgb(hex); return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.58 ? '#232220' : '#f3eee5'; }
 function colCount() {
   const w = window.innerWidth;
   if (w < 1000) return 2;
@@ -158,7 +181,7 @@ function toast(msg, action, fn) {
   if (action) t.append(h('button', { type: 'button', text: action, onclick: () => { t.classList.remove('on'); fn(); } }));
   t.classList.add('on');
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => t.classList.remove('on'), action ? 5200 : 1800);
+  toast.timer = setTimeout(() => t.classList.remove('on'), action ? 5000 : 1800);
 }
 async function copy(text) {
   try { await navigator.clipboard.writeText(text); } catch {
@@ -199,13 +222,32 @@ const fontIO = new IntersectionObserver((entries) => {
     if (!e.isIntersecting) continue;
     fontIO.unobserve(e.target);
     const { fam, weights, text } = e.target._gf;
-    loadGF({ family: fam, weights }, text).then((ok) => { if (ok) e.target.classList.add('ready'); else e.target.classList.add('ready', 'nofont'); });
+    loadGF({ family: fam, weights }, text).then((ok) => { e.target.classList.add('ready'); if (!ok) e.target.classList.add('nofont'); });
   }
 }, { rootMargin: '600px 0px' });
 function liveFont(el, f, text) {
   el.style.setProperty('--ff', `"${f.family}"`);
   el._gf = { fam: f.family, weights: f.weights, text };
   fontIO.observe(el);
+  return el;
+}
+
+// ───────────────────────────────────────────── comparsa allo scroll (una volta per elemento)
+let revealIO = null;
+if ('IntersectionObserver' in window) {
+  revealIO = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      e.target.classList.add('in');
+      revealIO.unobserve(e.target);
+    }
+  }, { rootMargin: '0px' });
+}
+function reveal(el, delay = 0) {
+  if (!revealIO || !motionOK() || el.classList.contains('in')) return el;
+  el.classList.add('rv');
+  el.style.setProperty('--d', Math.round(delay) + 'ms');
+  revealIO.observe(el);
   return el;
 }
 
@@ -233,7 +275,7 @@ async function loadAll() {
   await Promise.all(S.months.filter((m) => !S.loaded.has(m)).map((m) => loadMonth(m).catch(() => null)));
 }
 
-// ───────────────────────────────────────────── filtro, raggruppamento
+// ───────────────────────────────────────────── filtro e raggruppamento per giorno
 function visibleItems() {
   const now = Date.now();
   const maxAge = S.period ? S.period * 864e5 : Infinity;
@@ -264,7 +306,7 @@ function visibleItems() {
   }
   return out;
 }
-// Ordina per rilevanza ma evita muri della stessa fonte: finestra di 12, penalità per fonte e categoria già viste.
+// ordina per rilevanza ma evita muri della stessa fonte: finestra di 12, penalità per fonte e categoria già viste
 function diversify(list) {
   const out = [], bySrc = {}, byCat = {}, pool = list.slice();
   while (pool.length) {
@@ -301,7 +343,7 @@ function groupByDay(list) {
     }
     const top = g.items[0];
     if (top && top.image && !top.font && top.type !== 'colour' && g.items.length >= 5 && eff(top) >= 60) g.lead = g.items.shift();
-    // una sola fascia trend per giorno; le altre diventano card nel masonry (il feed resta un feed)
+    // una sola fascia trend per giorno: le altre diventano card nel mosaico, il feed resta un feed
     if (S.cat !== 'trends' && g.trends.length > 1) {
       g.trends.splice(1).forEach((t, k) => g.items.splice(Math.min(g.items.length, 3 + k * 5), 0, t));
     }
@@ -314,34 +356,31 @@ function flatList() {
   return out;
 }
 
-// ───────────────────────────────────────────── card
-function openBtn(it, label) {
-  return h('button', { class: 'open', type: 'button', 'aria-label': (label || 'Open') + ': ' + it.title, onclick: () => openDetail(it) });
+// ───────────────────────────────────────────── card: foto + descrizione breve
+function ariaFor(it) {
+  const sh = shortOf(it);
+  const bits = [sh.s];
+  if (sh.k) bits.push(sh.k);
+  if (it.title && norm(it.title) !== norm(sh.s)) bits.push(it.title);
+  if (it.sid) bits.push('from ' + srcName(it.sid));
+  return bits.join('. ');
 }
-function saveBtn(it) {
-  const on = !!S.saved[it.id];
-  const b = h('button', {
-    class: 'save', type: 'button', 'data-save': it.id, 'aria-pressed': String(on),
-    'aria-label': (on ? 'Remove from saved: ' : 'Save: ') + it.title,
-    onclick: (e) => { e.stopPropagation(); toggleSave(it); },
-  });
-  b.append(icon('save'));
-  return b;
+function savedMark(it) { return S.saved[it.id] ? h('span', { class: 'mark', title: 'Saved' }, icon('save')) : null; }
+function capEl(it) {
+  const sh = shortOf(it);
+  return h('div', { class: 'cap' }, h('div', {}, h('h3', { text: sh.s }), sh.k ? h('p', { text: sh.k }) : null), savedMark(it));
 }
-function metaRow(it) {
-  return h('div', { class: 'meta' },
-    isNew(it) ? h('span', { class: 'dot', title: 'New since your last visit' }) : null,
-    h('span', { class: 'src', text: srcName(it.sid) }),
-    h('time', { datetime: it.date, title: dateLine(it), text: rel(it.date) }),
-    saveBtn(it));
+function openBtn(it, list) {
+  return h('button', { class: 'open', type: 'button', 'aria-label': ariaFor(it), onclick: () => openDetail(it, list) });
 }
-const showWhy = (it) => it.why && (it.score || 0) >= 55 && !/^(Credited to|Published by)/.test(it.why);
-
+function tile(it, cls, media, list) {
+  return h('article', { class: 'tile' + (cls ? ' ' + cls : ''), 'data-id': it.id, 'data-sid': it.sid || '' }, media, capEl(it), openBtn(it, list));
+}
 function coverEl(it) {
+  // immagine assente o bloccata: campo del colore dominante + palette, niente titolo (sta già nella didascalia)
   const pal = it.palette || [];
-  const c0 = pal[0] ? pal[0].hex : '#161616';
-  const c = h('div', { class: 'cover', vars: { '--c0': c0, '--ink': inkOn(c0) } },
-    h('small', { text: srcName(it.sid) }), h('b', { text: it.title }));
+  const c0 = pal[0] ? pal[0].hex : null;
+  const c = h('div', { class: 'cover', vars: c0 ? { '--c0': c0, '--ink': inkOn(c0) } : null }, h('small', { text: srcName(it.sid) }));
   if (pal.length > 1) {
     const st = h('div', { class: 'strip' });
     for (const p of pal) st.append(h('i', { vars: { '--c': p.hex, '--s': Math.max(p.share, 0.05) } }));
@@ -367,65 +406,32 @@ function mediaEl(it, fixed) {
   if (it.video) m.append(h('span', { class: 'play' }, icon('play')));
   return m;
 }
-function fontTagline(f) {
-  const bits = [f.category ? f.category.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase()) : 'Typeface'];
-  const axes = (f.axes || []).map((a) => a.tag).filter(Boolean);
-  if (axes.length) bits.push('variable ' + axes.join(', '));
-  else if (f.weights && f.weights.length > 1) bits.push(`${f.weights[0]} to ${f.weights[f.weights.length - 1]}`);
-  if (f.italic) bits.push('with italics');
-  return bits.join(', ');
+function specimen(f, ar) {
+  const text = f.family + 'Hamburgefonstiv 0123';
+  const spec = liveFont(h('div', { class: 'spec' }, h('div', { class: 'big', text: f.family }), h('div', { class: 'line', text: 'Hamburgefonstiv 0123' })), f, text);
+  return h('div', { class: 'media specimen', 'aria-hidden': 'true', vars: { '--ar': ar || '4 / 5' } }, spec);
 }
-function fontCard(it) {
-  const f = it.font;
-  const spec = liveFont(h('div', { class: 'spec' }, h('div', { class: 'big', text: f.family }), h('div', { class: 'line', text: 'Hamburgefonstiv 0123' })),
-    f, f.family + 'Hamburgefonstiv 0123');
-  return h('article', { class: 'card fontcard', 'data-id': it.id, 'data-sid': it.sid },
-    h('div', { class: 'media', 'aria-hidden': 'true', vars: { '--ar': '4 / 5' } }, spec, h('div', { class: 'tagline', text: fontTagline(f) })),
-    openBtn(it),
-    h('div', { class: 'body' },
-      h('h3', { text: f.family + (it.kind === 'update' ? ' (updated)' : '') }),
-      h('p', { class: 'by', text: it.author || 'Google Fonts' }),
-      showWhy(it) ? h('p', { class: 'why', text: it.why }) : null,
-      metaRow(it)));
+function swatchMedia(pal, ar) {
+  const m = h('div', { class: 'media swatches', 'aria-hidden': 'true', vars: { '--ar': ar || '5 / 4' } });
+  for (const p of pal) m.append(h('i', { vars: { '--c': p.hex, '--s': Math.max(p.share, 0.06) } }));
+  return m;
 }
-function colourCard(it) {
-  const sw = h('div', { class: 'swatches' });
-  for (const p of it.palette) sw.append(h('i', { vars: { '--c': p.hex, '--s': Math.max(p.share, 0.06) } }));
-  const hexes = h('p', { class: 'hexes' }, it.palette.slice(0, 6).map((p) => h('span', { vars: { '--c': p.hex }, text: p.hex })));
-  return h('article', { class: 'card colourcard', 'data-id': it.id, 'data-sid': it.sid },
-    h('div', { class: 'media', 'aria-hidden': 'true', vars: { '--ar': '5 / 4' } }, sw),
-    openBtn(it, 'Open palette'),
-    h('div', { class: 'body' }, h('h3', { text: 'Palette from ' + it.title }), hexes, metaRow(it)));
+function cardEl(it, list) {
+  if (it.type === 'trend') return trendTile(it, list);
+  if (it.type === 'colour') return tile(it, 'colour', swatchMedia(it.palette), list);
+  if (it.font) return tile(it, 'font', specimen(it.font), list);
+  return tile(it, '', mediaEl(it), list);
 }
-function cardEl(it) {
-  if (it.type === 'trend') return trendCard(it);
-  if (it.type === 'colour') return colourCard(it);
-  if (it.font) return fontCard(it);
-  return h('article', { class: 'card', 'data-id': it.id, 'data-sid': it.sid },
-    mediaEl(it),
-    openBtn(it),
-    h('div', { class: 'body' },
-      h('h3', { text: it.title }),
-      it.author ? h('p', { class: 'by', text: it.author }) : null,
-      it.fonts && it.fonts.length ? h('p', { class: 'set', text: 'Set in ' + it.fonts.slice(0, 3).join(', ') }) : null,
-      showWhy(it) ? h('p', { class: 'why', text: it.why }) : null,
-      metaRow(it)));
-}
-function leadEl(it) {
-  return h('article', { class: 'card lead', 'data-id': it.id, 'data-sid': it.sid },
-    mediaEl(it, true),
-    openBtn(it),
-    h('div', { class: 'body' },
-      h('h3', { text: it.title }),
-      it.author ? h('p', { class: 'by', text: it.author }) : null,
-      it.summary ? h('p', { class: 'summary', text: it.summary.length > 230 ? it.summary.slice(0, 228).replace(/\s+\S*$/, '') + '…' : it.summary }) : null,
-      showWhy(it) ? h('p', { class: 'why', text: it.why }) : null,
-      metaRow(it)));
-}
+function leadEl(it) { return tile(it, 'lead', mediaEl(it, true)); }
 function labelEl(label) {
   return h('span', { class: 'label' + (label === 'Detected trend' ? ' detected' : '') }, h('i'), label);
 }
-function evGrid(ev, n = 4) {
+function trendMeta(t) {
+  const n = (t.sources || []).length;
+  if (t.family === 'font') return `In ${plural(t.count || 0, 'project', 'projects')} from ${plural(n, 'source', 'sources')}`;
+  return `${plural(t.count || 0, 'item', 'items')} from ${plural(n, 'source', 'sources')}, last 14 days`;
+}
+function evGrid(ev, n) {
   const g = h('div', { class: 'ev', 'aria-hidden': 'true' });
   for (const e of (ev || []).filter((x) => x.image).slice(0, n)) {
     const m = h('div', { class: 'm', vars: e.palette && e.palette[0] ? { '--ph': e.palette[0].hex } : null });
@@ -437,42 +443,28 @@ function evGrid(ev, n = 4) {
   }
   return g;
 }
-function srcList(sids, n = 5) {
-  const names = sids.map(srcName);
-  return names.length > n ? names.slice(0, n).join(', ') + ` and ${names.length - n} more` : names.join(', ');
-}
-function trendVisual(t, big) {
+function trendVisual(t, n) {
   if (t.family === 'font') {
     const el = h('div', { class: 'fontprev', text: t.title });
     if (t.font && t.font.provider === 'google') liveFont(el, t.font, t.title);
     return el;
   }
-  const wrap = h('div', {}, evGrid(t.evidence));
-  if (t.swatches && t.swatches.length) wrap.append(h('div', { class: 'chips' }, t.swatches.slice(0, big ? 6 : 4).map((c) => h('i', { vars: { '--c': c }, title: c }))));
+  const wrap = h('div', { class: 'tvis' }, evGrid(t.evidence, n));
+  if (t.swatches && t.swatches.length) wrap.append(h('div', { class: 'chips' }, t.swatches.slice(0, 5).map((c) => h('i', { vars: { '--c': c } }))));
   return wrap;
 }
 function trendBand(t) {
-  return h('article', { class: 'trend', 'data-id': t.id },
-    h('div', {},
-      labelEl(t.label),
-      h('h3', { text: t.title }),
-      h('p', { text: t.summary }),
-      h('p', { class: 'srcs', text: `Sources: ${srcList(t.sources)}. First detected ${fullDate(t.firstDetected)}.` })),
-    trendVisual(t, true),
-    openBtn(t, 'Open trend'));
+  return h('article', { class: 'tile band', 'data-id': t.id },
+    h('div', {}, labelEl(t.label), h('h3', { text: t.title }), h('p', { text: trendMeta(t) })),
+    trendVisual(t, 4), openBtn(t));
 }
-function trendCard(t, list) {
-  return h('article', { class: 'tcard', 'data-id': t.id },
-    labelEl(t.label),
-    t.family === 'font' ? trendVisual(t) : null,
-    h('h3', { text: t.title }),
-    h('p', { text: t.summary }),
-    t.family !== 'font' ? trendVisual(t) : null,
-    h('p', { class: 'srcs', text: `${srcList(t.sources, 4)}. First detected ${fullDate(t.firstDetected)}.` }),
-    h('button', { class: 'open', type: 'button', 'aria-label': 'Open trend: ' + t.title, onclick: () => openDetail(t, list) }));
+function trendTile(t, list) {
+  return h('article', { class: 'tile ttile', 'data-id': t.id },
+    labelEl(t.label), h('h3', { text: t.title }), h('p', { class: 'tt-meta', text: trendMeta(t) }),
+    trendVisual(t, 4), openBtn(t, list));
 }
 
-// ───────────────────────────────────────────── masonry per giorno
+// ───────────────────────────────────────────── mosaico per giorno
 function setCols(blk) {
   const n = colCount();
   blk.n = n; blk.width = window.innerWidth; blk.cols.textContent = ''; blk.heights = new Array(n).fill(0); blk.colEls = [];
@@ -482,18 +474,20 @@ function place(blk, card) {
   let k = 0;
   for (let i = 1; i < blk.n; i++) if (blk.heights[i] < blk.heights[k] - 1) k = i;
   blk.colEls[k].append(card);
-  blk.heights[k] += card.offsetHeight + 24;
+  blk.heights[k] += card.offsetHeight + 20;
+  return k;
 }
 function makeBlock(g) {
   const all = [g.lead, ...g.items].filter((x) => x && x.type !== 'trend');
   const nNew = all.filter(isNew).length;
+  const count = all.length ? plural(all.length, 'item', 'items') : plural(g.trends.length, 'pattern', 'patterns');
   const el = h('section', { class: 'day', 'data-day': g.day, 'aria-label': dayLabel(g.day) },
     h('header', { class: 'day-head' },
       h('h2', { text: dayLabel(g.day) }),
-      h('p', {}, all.length ? plural(all.length, 'item', 'items') : plural(g.trends.length, 'pattern', 'patterns'),
+      h('p', {}, count, S.cat !== 'all' && S.cat !== 'trends' ? ' in ' + CAT_LABEL[S.cat] : '',
         nNew ? h('span', { class: 'new', text: `, ${nNew} new since your last visit` }) : null)));
-  if (g.lead) { el.append(leadEl(g.lead)); S.renderedIds.add(g.lead.id); }
-  for (const t of g.trends) { el.append(trendBand(t)); S.renderedIds.add(t.id); }
+  if (g.lead) { el.append(reveal(leadEl(g.lead))); S.renderedIds.add(g.lead.id); }
+  for (const t of g.trends) { el.append(reveal(trendBand(t))); S.renderedIds.add(t.id); }
   const cols = h('div', { class: 'cols' });
   el.append(cols);
   const blk = { el, cols, cards: [] };
@@ -504,6 +498,7 @@ function makeBlock(g) {
 function renderMore(n = 30) {
   if (S.view !== 'feed') return;
   let budget = n;
+  const list = flatList();
   while (budget > 0 && S.gi < S.groups.length) {
     const g = S.groups[S.gi];
     let blk = S.blocks.get(g.day);
@@ -511,9 +506,10 @@ function renderMore(n = 30) {
     while (budget > 0 && g.ii < g.items.length) {
       const it = g.items[g.ii++];
       if (S.renderedIds.has(it.id)) continue;
-      const c = cardEl(it);
+      const c = cardEl(it, it.type === 'trend' ? list : undefined);
       blk.cards.push(c);
-      place(blk, c);
+      const k = place(blk, c);
+      reveal(c, k * 45);
       S.renderedIds.add(it.id);
       budget--;
     }
@@ -573,7 +569,7 @@ function removeCards(pred) {
     blk.cards = blk.cards.filter((c) => !pred(c.dataset));
     if (blk.cards.length !== before) { setCols(blk); for (const c of blk.cards) place(blk, c); }
   }
-  $$('.lead, .trend', feedEl).forEach((n) => { if (pred(n.dataset)) n.remove(); });
+  $$('.lead, .band', feedEl).forEach((n) => { if (pred(n.dataset)) n.remove(); });
 }
 function emptyState() {
   const cat = CAT_LABEL[S.cat];
@@ -584,10 +580,10 @@ function emptyState() {
   if (S.q) {
     title = `No results for "${$('#q').value}"`;
     text = 'Search looks at titles, studios, typefaces, tags and sources. Try a shorter word.';
-    action = h('button', { class: 'btn', type: 'button', text: 'Clear search', onclick: () => { $('#q').value = ''; S.q = ''; rebuild(); } });
+    action = h('button', { class: 'btn', type: 'button', text: 'Clear search', onclick: () => closeSearch(true) });
   } else if (S.cat === 'trends') {
     title = 'No trend alerts yet';
-    text = 'A pattern needs at least four items from three independent sources before Segnale flags it (three from two once it can measure growth). The Trending tab also shows the weaker signals.';
+    text = 'A pattern needs at least four items from three independent sources before DSGNBRD flags it (three from two once it can measure growth). The Trending tab also shows the weaker signals.';
     action = h('button', { class: 'btn', type: 'button', text: 'Open Trending', onclick: () => setView('trending') });
   } else if (per) {
     title = S.cat === 'all' ? `Nothing new in ${per}` : `Nothing in ${cat} for ${per}`;
@@ -596,6 +592,7 @@ function emptyState() {
   } else if (S.cat !== 'all') {
     title = `Nothing in ${cat} right now`;
     text = S.prefs[S.cat] === 'off' ? `${cat} is turned off in your preferences.` : 'No source has published in this category within the archive window.';
+    action = h('button', { class: 'btn', type: 'button', text: 'Show all categories', onclick: () => setCat('all') });
   }
   return h('div', { class: 'empty' }, h('h2', { text: title }), h('p', { text }), action);
 }
@@ -621,21 +618,30 @@ function openDetail(it, list) {
   S.dlist = list && list.length ? list : listForView();
   S.didx = S.dlist.findIndex((x) => x.id === it.id);
   if (S.didx < 0) { S.dlist = [it]; S.didx = 0; }
-  renderDetail();
+  renderDetail(0);
   if (!sheet.open) {
+    sheet.classList.remove('closing');
     sheet.showModal();
-    const ttl = $('#sheetBody h2'); if (ttl) ttl.focus({ preventScroll: true });
     history.pushState({ sheet: 1 }, '', '#' + encodeURIComponent(it.id));
+    const t = $('#sheetBody h2');
+    if (t) t.focus({ preventScroll: true });
   } else {
     history.replaceState({ sheet: 1 }, '', '#' + encodeURIComponent(it.id));
   }
   learn(it, 0.2);
 }
+function closeDialog(dlg) {
+  if (!dlg.open || dlg.classList.contains('closing')) return;
+  if (!motionOK()) { dlg.close(); return; }
+  dlg.classList.add('closing');
+  setTimeout(() => { dlg.classList.remove('closing'); if (dlg.open) dlg.close(); }, 190);
+}
+const closeSheet = () => closeDialog(sheet);
 function step(d) {
   const n = S.didx + d;
   if (n < 0 || n >= S.dlist.length) return;
   S.didx = n;
-  renderDetail();
+  renderDetail(d);
   history.replaceState({ sheet: 1 }, '', '#' + encodeURIComponent(S.dlist[n].id));
 }
 function stageFor(it) {
@@ -658,14 +664,14 @@ function stageFor(it) {
       b.append(h('span', { text: e.title }));
       grid.append(b);
     }
-    stage.style.background = 'var(--carbon)';
+    stage.style.background = '';
     stage.append(grid);
   } else if (it.type === 'colour') {
     const sw = h('div', { class: 'swatches' });
     for (const p of it.palette) sw.append(h('i', { vars: { '--c': p.hex, '--s': Math.max(p.share, 0.06) } }));
     stage.append(sw);
   } else if (it.font) {
-    stage.style.background = 'var(--carbon)';
+    stage.style.background = '';
     const spec = h('div', { class: 'spec ready' }, h('div', { class: 'big', text: it.font.family }),
       h('div', { class: 'line', text: 'The quick brown fox jumps over the lazy dog 0123456789' }));
     spec.style.setProperty('--ff', `"${it.font.family}"`);
@@ -719,37 +725,54 @@ function paletteBlock(pal) {
     return h('button', { type: 'button', 'aria-label': 'Copy ' + p.hex, onclick: () => copy(p.hex) },
       h('i', { vars: { '--c': p.hex } }),
       h('span', {}, p.hex, h('small', { text: `  RGB ${rgb.join(' ')}   HSL ${hh} ${s}% ${l}%` })),
-      h('em', { text: Math.round(p.share * 100) + '%' }));
+      p.share ? h('em', { text: Math.round(p.share * 100) + '%' }) : h('em'));
   }));
+}
+function fontTagline(f) {
+  const bits = [f.category ? cap1(f.category.replace(/_/g, ' ').toLowerCase()) : 'Typeface'];
+  const axes = (f.axes || []).map((a) => a.tag).filter(Boolean);
+  if (axes.length) bits.push('variable ' + axes.join(', '));
+  else if (f.weights && f.weights.length > 1) bits.push(`${f.weights[0]} to ${f.weights[f.weights.length - 1]}`);
+  if (f.italic) bits.push('with italics');
+  return bits.join(', ');
 }
 function fontFacts(f) {
   const rows = [];
   if (f.designers && f.designers.length) rows.push('Designed by ' + f.designers.join(', '));
-  rows.push(fontTagline(f));
+  if (f.category || (f.axes && f.axes.length) || (f.weights && f.weights.length)) rows.push(fontTagline(f));
   if (f.axes && f.axes.length) rows.push('Axes: ' + f.axes.map((a) => `${a.tag} ${a.min} to ${a.max}`).join(', '));
   if (f.styles) rows.push(plural(f.styles, 'style', 'styles'));
   if (f.dateAdded) rows.push('Added to Google Fonts on ' + fullDate(f.dateAdded));
   if (f.lastModified && f.lastModified !== f.dateAdded) rows.push('Last updated ' + fullDate(f.lastModified));
   if (f.trending) rows.push(`Trending rank #${f.trending} on Google Fonts`);
   if (f.popularity) rows.push(`Popularity rank #${f.popularity} on Google Fonts`);
+  if (!rows.length) rows.push(f.provider === 'google' ? 'On Google Fonts' : 'Commercial or independent typeface: no live preview here');
   return h('ul', { class: 'reasons' }, rows.map((r) => h('li', { text: r })));
 }
-function renderDetail() {
+function srcList(sids, n = 5) {
+  const names = (sids || []).map(srcName);
+  return names.length > n ? names.slice(0, n).join(', ') + ` and ${names.length - n} more` : names.join(', ');
+}
+function renderDetail(dir) {
   const it = S.dlist[S.didx];
   const body = $('#sheetBody');
   body.textContent = '';
+  body.classList.remove('from-r', 'from-l');
+  if (dir && motionOK()) { void body.offsetWidth; body.classList.add(dir > 0 ? 'from-r' : 'from-l'); }
+  const sh = shortOf(it);
   const info = h('div', { class: 'info' });
-  put(info, h('button', { class: 'icon close', type: 'button', 'aria-label': 'Close', onclick: () => sheet.close() }, icon('close')));
+  put(info, h('button', { class: 'icon close', type: 'button', 'aria-label': 'Close', onclick: closeSheet }, icon('close')));
   if (S.dlist.length > 1) put(info, h('p', { class: 'pos', text: `${S.didx + 1} of ${S.dlist.length}` }));
   if (it.type === 'trend') put(info, labelEl(it.label));
+  else if (sh.k) put(info, h('p', { class: 'kind', text: sh.k }));
   const title = h('h2', { tabindex: '-1', text: it.type === 'colour' ? 'Palette from ' + it.title : it.title });
   put(info, title);
-  if (it.author) put(info, h('p', { class: 'by', text: it.author }));
+  if (it.author && it.type !== 'trend') put(info, h('p', { class: 'by', text: it.author }));
   put(info, h('p', { class: 'when', text: dateLine(it) }));
   if (it.summary) put(info, h('p', { class: 'summary', text: it.summary }));
 
   if (it.type === 'trend') {
-    put(info, 
+    put(info,
       block('How it was detected',
         h('ul', { class: 'reasons' },
           h('li', { text: it.basis === 'growth' ? 'Measured growth against the previous weeks.' : 'Recurrence across independent sources. Growth is not measured yet.' }),
@@ -758,16 +781,16 @@ function renderDetail() {
       block('Evidence', h('ul', { class: 'reasons' }, (it.evidence || []).map((e) =>
         h('li', {}, h('a', { href: e.url, target: '_blank', rel: 'noopener noreferrer', text: e.title }), ` (${srcName(e.sid)}, ${fmtShort.format(new Date(e.date))})`)))),
       it.font ? block('Typeface', fontFacts(it.font)) : null,
-      it.swatches ? block('Colours', paletteBlock(it.swatches.map((hex) => ({ hex, share: 0 })))) : null);
-    put(info, h('div', { class: 'actions' }, detailSave(it)));
+      it.swatches ? block('Colours', paletteBlock(it.swatches.map((hex) => ({ hex, share: 0 })))) : null,
+      it.id.startsWith('sig-') ? null : h('div', { class: 'actions' }, detailSave(it)));
   } else {
-    const out = h('a', { class: 'btn primary', href: it.url, target: '_blank', rel: 'noopener noreferrer', onclick: () => learn(it, 0.5) }, 'Open original', icon('out'));
     put(info, h('div', { class: 'actions' },
-      out, detailSave(it),
-      h('button', { class: 'btn', type: 'button', onclick: () => hideItem(it) }, icon('hide'), 'Hide'),
-      h('button', { class: 'btn', type: 'button', onclick: () => muteSource(it.sid) }, icon('mute'), 'Mute ' + srcName(it.sid))));
+      h('a', { class: 'btn primary', href: it.url, target: '_blank', rel: 'noopener noreferrer', onclick: () => learn(it, 0.5) }, 'Open original', icon('out')),
+      it.id.startsWith('gf-') ? null : detailSave(it),
+      it.sid && !it.id.startsWith('gf-') ? h('button', { class: 'btn', type: 'button', onclick: () => hideItem(it) }, icon('hide'), 'Hide') : null,
+      it.sid ? h('button', { class: 'btn', type: 'button', onclick: () => muteSource(it.sid) }, icon('mute'), 'Mute ' + srcName(it.sid)) : null));
     const reasons = (it.reasons && it.reasons.length ? it.reasons : [it.why]).filter(Boolean);
-    put(info, 
+    put(info,
       block('Why it is here', h('ul', { class: 'reasons' }, reasons.map((r) => h('li', { text: r })))),
       it.font ? block('Typeface', fontFacts(it.font)) : null,
       block('Palette', paletteBlock(it.palette)),
@@ -780,7 +803,7 @@ function renderDetail() {
         im.addEventListener('error', () => im.remove(), { once: true });
         return im;
       }))) : null,
-      h('p', { class: 'srcline' }, 'Source → ', h('a', { href: it.url, target: '_blank', rel: 'noopener noreferrer', text: srcName(it.sid) })));
+      it.sid ? h('p', { class: 'srcline' }, 'Source → ', h('a', { href: it.url, target: '_blank', rel: 'noopener noreferrer', text: srcName(it.sid) })) : null);
   }
   body.append(stageFor(it), info);
   info.scrollTop = 0;
@@ -794,9 +817,10 @@ function detailSave(it) {
 }
 function searchFor(term) {
   if (sheet.open) sheet.close();
+  openSearch(true);
   $('#q').value = term;
   S.q = norm(term);
-  loadAll().then(() => { setView('feed'); rebuild(); });
+  loadAll().then(() => { if (S.view !== 'feed') setView('feed'); rebuild(); });
 }
 
 // ───────────────────────────────────────────── azioni + apprendimento
@@ -807,29 +831,45 @@ function learn(it, w) {
   a.src[it.sid] = clamp((a.src[it.sid] || 0) + w * 0.6, -6, 6);
   store.set('aff', a);
 }
-function syncSave(id) {
-  const on = !!S.saved[id];
-  for (const b of $$(`[data-save="${CSS.escape(id)}"]`)) {
-    b.setAttribute('aria-pressed', String(on));
-    const l = $('.lbl', b);
-    if (l) l.textContent = on ? 'Saved' : 'Save';
+function syncSave(id, animate) {
+  if (id) {
+    const on = !!S.saved[id];
+    for (const b of $$(`[data-save="${CSS.escape(id)}"]`)) {
+      b.setAttribute('aria-pressed', String(on));
+      const l = $('.lbl', b);
+      if (l) l.textContent = on ? 'Saved' : 'Save';
+    }
+    for (const t of $$(`.tile[data-id="${CSS.escape(id)}"]`)) {
+      const cap = $(':scope > .cap', t);
+      if (cap) {
+        const m = $('.mark', cap);
+        if (on && !m) cap.append(h('span', { class: 'mark', title: 'Saved' }, icon('save')));
+        if (!on && m) m.remove();
+      }
+      if (animate && motionOK()) restart(t, 'pop');
+    }
   }
   const n = Object.keys(S.saved).length;
-  $('#savedCount').textContent = n ? String(n) : '';
+  const c = $('#savedCount');
+  const txt = n ? String(n) : '';
+  if (c.textContent !== txt) {
+    c.textContent = txt;
+    if (animate && motionOK()) restart(c, 'bump');
+  }
 }
 function toggleSave(it) {
-  if (S.saved[it.id]) {
+  const was = !!S.saved[it.id];
+  if (was) {
     delete S.saved[it.id];
-    toast('Removed from saved');
   } else {
     const snap = { ...it, savedAt: new Date().toISOString() };
     delete snap._h;
     S.saved[it.id] = snap;
     learn(it, 1);
-    toast('Saved');
   }
   store.set('saved', S.saved);
-  syncSave(it.id);
+  syncSave(it.id, true);
+  toast(was ? 'Removed from saved' : 'Saved', 'Undo', () => toggleSave(it));
   if (S.view === 'saved' && !sheet.open) renderSaved();
 }
 function hideItem(it) {
@@ -839,7 +879,7 @@ function hideItem(it) {
   removeCards((d) => d.id === it.id);
   if (sheet.open) {
     S.dlist.splice(S.didx, 1);
-    if (S.dlist.length) { S.didx = Math.min(S.didx, S.dlist.length - 1); renderDetail(); } else sheet.close();
+    if (S.dlist.length) { S.didx = Math.min(S.didx, S.dlist.length - 1); renderDetail(0); } else closeSheet();
   }
   toast('Hidden. You will see a bit less like this.', 'Undo', () => {
     S.hidden.delete(it.id);
@@ -851,23 +891,28 @@ function hideItem(it) {
 function muteSource(sid) {
   S.muted.add(sid);
   store.set('muted', [...S.muted]);
-  if (sheet.open) sheet.close();
+  if (sheet.open) closeSheet();
   removeCards((d) => d.sid === sid);
   toast(`Muted ${srcName(sid)}`, 'Undo', () => { S.muted.delete(sid); store.set('muted', [...S.muted]); rebuild(true); });
 }
 
-// ───────────────────────────────────────────── viste
+// ───────────────────────────────────────────── viste e filtri
 function setView(v) {
   S.view = v;
+  document.body.classList.remove('v-feed', 'v-trending', 'v-saved');
+  document.body.classList.add('v-' + v);
   for (const b of $$('.views button')) b.setAttribute('aria-current', b.dataset.view === v ? 'page' : 'false');
   feedEl.hidden = v !== 'feed';
   trendEl.hidden = v !== 'trending';
   savedEl.hidden = v !== 'saved';
-  $('#filters').classList.toggle('off', v !== 'feed');
+  $('#filters').hidden = v !== 'feed';
   statusEl.textContent = '';
+  if (S.wheel) S.wheel.close();
   if (v === 'trending') renderTrending();
   if (v === 'saved') renderSaved();
   if (v === 'feed' && !S.blocks.size) rebuild();
+  const sec = { feed: feedEl, trending: trendEl, saved: savedEl }[v];
+  if (motionOK()) restart(sec, 'enter');
   window.scrollTo(0, 0);
 }
 function setPeriod(p) {
@@ -875,8 +920,22 @@ function setPeriod(p) {
   for (const b of $$('#period button')) b.setAttribute('aria-pressed', String(Number(b.dataset.p) === p));
   rebuild();
 }
+function setCat(k) {
+  S.cat = k;
+  const label = CAT_LABEL[k];
+  $('#catLbl').textContent = k === 'all' ? '' : label;
+  $('#catHandle').setAttribute('aria-label', `Categories, showing ${k === 'all' ? 'everything' : label}. Hold and slide to choose, or press to open the wheel.`);
+  const chip = $('#catChip');
+  chip.hidden = k === 'all';
+  $('.t', chip).textContent = label;
+  chip.setAttribute('aria-label', `Showing ${label}. Remove this filter`);
+  if (S.view !== 'feed') setView('feed');
+  rebuild();
+}
 function savedList() {
-  return Object.values(S.saved).sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
+  return Object.values(S.saved)
+    .sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''))
+    .map((s) => S.byId.get(s.id) || S.trendItems.find((t) => t.id === s.id) || s);
 }
 function renderSaved() {
   savedEl.textContent = '';
@@ -888,24 +947,25 @@ function renderSaved() {
       h('button', { class: 'btn', type: 'button', text: 'Export', onclick: exportData }),
       h('button', { class: 'btn', type: 'button', text: 'Import', onclick: () => fileIn.click() }),
       list.length ? h('button', { class: 'btn', type: 'button', text: 'Clear all', onclick: clearSaved }) : null,
-      fileIn)));
+      fileIn),
+    list.length ? h('p', { text: `${plural(list.length, 'item', 'items')} on this device. Long-press a card anywhere to save or remove it.` }) : null));
   S.savedBlk = null;
   if (!list.length) {
     savedEl.append(h('div', { class: 'empty' }, h('h2', { text: 'Nothing saved yet' }),
-      h('p', { text: 'Tap the bookmark on a card to keep it here. Saved items stay after they leave the feed, on this device. Export moves them to another device.' })));
+      h('p', { text: 'Long-press a card to keep it here, or use Save when a card is open. Saved items stay after they leave the feed, on this device. Export moves them to another device.' })));
     return;
   }
   const cols = h('div', { class: 'cols' });
   savedEl.append(cols);
   const blk = { el: savedEl, cols, cards: [] };
   setCols(blk);
-  for (const it of list) { const c = cardEl(it); blk.cards.push(c); place(blk, c); }
+  for (const it of list) { const c = cardEl(it, list); blk.cards.push(c); reveal(c, place(blk, c) * 45); }
   S.savedBlk = blk;
 }
 function exportData() {
-  const data = { app: 'segnale', version: 1, exportedAt: new Date().toISOString(), saved: S.saved, hidden: [...S.hidden], muted: [...S.muted], prefs: S.prefs, aff: S.aff };
+  const data = { app: 'dsgnbrd', version: 1, exportedAt: new Date().toISOString(), saved: S.saved, hidden: [...S.hidden], muted: [...S.muted], prefs: S.prefs, aff: S.aff };
   const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
-  const a = h('a', { href: url, download: `segnale-${dayKey(new Date().toISOString())}.json` });
+  const a = h('a', { href: url, download: `dsgnbrd-${dayKey(new Date().toISOString())}.json` });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
   toast('Exported saved items and preferences');
@@ -914,7 +974,7 @@ async function importData(file) {
   if (!file) return;
   try {
     const d = JSON.parse(await file.text());
-    if (d.app !== 'segnale') throw new Error('not a Segnale export');
+    if (d.app !== 'dsgnbrd' && d.app !== 'segnale') throw new Error('not a DSGNBRD export');
     const before = Object.keys(S.saved).length;
     Object.assign(S.saved, d.saved || {});
     (d.hidden || []).forEach((x) => S.hidden.add(x));
@@ -937,139 +997,169 @@ function clearSaved() {
   toast('Cleared saved items', 'Undo', () => { S.saved = backup; store.set('saved', S.saved); syncSave(''); renderSaved(); });
 }
 
-// Trending
-function sec(title, lede, ...content) {
-  return h('section', { class: 'tr-sec' }, h('h2', { text: title }), lede ? h('p', { text: lede }) : null, content);
-}
+// ───────────────────────────────────────────── Trending: sezioni nette con titoli grandi
+function asTrend(t) { return { ...t, type: 'trend', date: t.firstDetected }; }
 function pseudoTrend(id, label, title, summary, sources, evidence, extra) {
   return { id, type: 'trend', label, title, summary, sources, evidence, family: 'signal', basis: 'recurrence',
     firstDetected: S.index.generatedAt, date: S.index.generatedAt, count: evidence.length, ...extra };
 }
-function miniThumbs(ev) {
-  return h('span', { class: 'mini', 'aria-hidden': 'true' }, (ev || []).filter((e) => e.image).slice(0, 3).map((e) =>
-    h('i', { vars: e.palette && e.palette[0] ? { '--ph': e.palette[0].hex } : null },
-      h('img', { alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', src: e.image.src, onerror: (ev2) => ev2.target.remove() }))));
+function plainTile(id, media, title, sub, onOpen, cls) {
+  return h('article', { class: 'tile' + (cls ? ' ' + cls : ''), 'data-id': id, 'data-nosave': '' }, media,
+    h('div', { class: 'cap' }, h('div', {}, h('h3', { text: title }), sub ? h('p', { text: sub }) : null)),
+    h('button', { class: 'open', type: 'button', 'aria-label': `${title}. ${sub || ''}`, onclick: onOpen }));
+}
+function swatchTile(pt, hexes, title, sub, showHex) {
+  const m = h('div', { class: 'media swatchbox', 'aria-hidden': 'true', vars: { '--ar': '4 / 3' } },
+    hexes.map((x) => h('i', { vars: { '--c': x } })),
+    showHex ? h('span', { class: 'hex', vars: { '--ink': inkOn(hexes[0]) }, text: hexes[0].toUpperCase() }) : null);
+  return plainTile(pt.id, m, title, sub, () => openDetail(pt, [pt]));
+}
+function jumpTo(id) {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: motionOK() ? 'smooth' : 'auto', block: 'start' });
 }
 function renderTrending() {
   trendEl.textContent = '';
   const idx = S.index;
   if (!idx) return;
   const b = idx.baseline || {};
-  const lede = b.ok
-    ? `Built from ${b.recentItems} items published in the last ${b.recentDays} days, compared with ${b.baselineItems} items from the ${b.baseDays - b.recentDays} days before.`
-    : `Built from ${b.recentItems} items published in the last ${b.recentDays} days. Segnale has been watching for ${plural(b.observedDays || 0, 'day', 'days')}: growth is measured once it has three weeks of its own history. Until then a pattern means recurrence across independent sources, not proven growth.`;
-  trendEl.append(h('header', { class: 'tr-head' }, h('h1', { text: 'Trending now' }), h('p', { text: lede })));
   const sig = idx.signals || {};
+  const days = b.recentDays || 14;
+  const secs = [];
+  const stagger = (tiles) => tiles.map((t, i) => reveal(t, (i % 6) * 40));
+
   const active = (idx.trends || []).filter((t) => t.label !== 'Consolidated').map(asTrend);
-  trendEl.append(sec('Patterns', 'Inferred automatically from what the sources publish. Every pattern lists the projects behind it.',
-    active.length ? h('div', { class: 'tgrid' }, active.map((t) => trendCard(t, active)))
-      : h('p', { class: 'status', text: 'No pattern has enough evidence yet: it takes at least four items from three independent sources (three from two once growth can be measured).' })));
-
-  const cols = (sig.colours || []).slice(0, 8);
-  if (cols.length) {
-    trendEl.append(sec('Colour signals', 'Dominant colours from the lead image of each project, grouped by hue and tone. These are counts: a colour is called a trend only once Segnale can compare it with earlier weeks.',
-      h('div', { class: 'rows' }, cols.map((c) => {
-        const t = pseudoTrend('sig-col-' + c.bin, c.status || 'Colour signal', c.bin.replace(/^\w/, (x) => x.toUpperCase()),
-          `${c.count} palettes from ${c.sources.length} sources in the last ${b.recentDays || 14} days.`, c.sources, c.evidence, { swatches: [c.hex], family: 'colour' });
-        return h('div', { class: 'row' },
-          h('span', { class: 'sw', vars: { '--c': c.hex } }),
-          h('span', {}, h('span', { class: 't', text: t.title }),
-            h('small', { text: `${c.count} palettes, ${c.sources.length} sources${c.lift ? `, ${c.lift}x the previous rate` : ''}${c.status ? '. ' + c.status : ''}` })),
-          miniThumbs(c.evidence),
-          h('button', { class: 'open', type: 'button', 'aria-label': 'Open colour signal ' + t.title, onclick: () => openDetail(t, [t]) }));
-      })),
-      (sig.pairs || []).length ? h('div', { class: 'rows' }, sig.pairs.slice(0, 3).map((p) => {
-        const title = p.bins.map((x, i) => (i ? x : x.replace(/^\w/, (c) => c.toUpperCase()))).join(' + ');
-        const t = pseudoTrend('sig-pair-' + p.bins.join('-'), 'Recurring pairing', title,
-          `Seen together in ${p.count} palettes from ${p.sources.length} sources.`, p.sources, p.evidence, { swatches: p.hex, family: 'colour' });
-        return h('div', { class: 'row' },
-          h('span', { class: 'sw', vars: { '--c': `linear-gradient(90deg, ${p.hex[0]} 50%, ${p.hex[1]} 50%)` } }),
-          h('span', {}, h('span', { class: 't', text: title }), h('small', { text: `Together in ${p.count} palettes, ${p.sources.length} sources` })),
-          miniThumbs(p.evidence),
-          h('button', { class: 'open', type: 'button', 'aria-label': 'Open pairing ' + title, onclick: () => openDetail(t, [t]) }));
-      })) : null));
+  if (active.length) {
+    secs.push({ id: 'patterns', title: 'Patterns', n: active.length,
+      lede: 'Inferred automatically from what the sources publish. Every pattern lists the projects behind it.',
+      body: h('div', { class: 'tgrid wide' }, stagger(active.map((t) => trendTile(t, active)))) });
   }
-
-  const fonts = (sig.fonts || []).filter((f) => f.count >= 2).slice(0, 10);
+  const colours = (sig.colours || []).slice(0, 12);
+  const pairs = (sig.pairs || []).slice(0, 4);
+  if (colours.length || pairs.length) {
+    const tiles = [
+      ...colours.map((c) => {
+        const title = cap1(c.bin);
+        const pt = pseudoTrend('sig-col-' + c.bin, 'Colour signal', title, `${c.count} palettes from ${c.sources.length} sources in the last ${days} days.`,
+          c.sources, c.evidence, { swatches: [c.hex], family: 'colour' });
+        return swatchTile(pt, [c.hex], title, `${c.count} palettes, ${plural(c.sources.length, 'source', 'sources')}`, true);
+      }),
+      ...pairs.map((p) => {
+        const title = cap1(p.bins.join(' + '));
+        const pt = pseudoTrend('sig-pair-' + p.bins.join('-'), 'Recurring pairing', title, `Seen together in ${p.count} palettes from ${p.sources.length} sources.`,
+          p.sources, p.evidence, { swatches: p.hex, family: 'colour' });
+        return swatchTile(pt, p.hex, title, `Together in ${p.count} palettes`, false);
+      }),
+    ];
+    secs.push({ id: 'colour', title: 'Colour', n: tiles.length,
+      lede: 'Dominant colours from the lead image of each recent project, grouped by hue and tone. These are counts: a colour becomes a trend only once it can be compared with earlier weeks.',
+      body: h('div', { class: 'tgrid' }, stagger(tiles)) });
+  }
+  const fonts = (sig.fonts || []).filter((f) => f.count >= 2).slice(0, 12);
   if (fonts.length) {
-    trendEl.append(sec('Typefaces in use', 'Typefaces credited or named in recent projects (Fonts In Use, Typewolf, articles). Live previews load for Google Fonts families.',
-      h('div', { class: 'rows' }, fonts.map((f) => {
-        const t = pseudoTrend('sig-font-' + f.family, f.new ? 'New release in use' : 'Recurring typeface', f.family,
-          `Credited in ${f.count} recent projects from ${f.sources.length} sources.`, f.sources, f.evidence,
-          { family: 'font', font: { family: f.family, provider: f.google ? 'google' : null } });
-        const ff = h('span', { class: 'ff', text: f.family });
-        if (f.google) liveFont(ff, { family: f.family }, f.family);
-        return h('div', { class: 'row font' }, ff,
-          h('small', { text: `${f.count} projects, ${srcList(f.sources, 3)}${f.new ? '. New on Google Fonts' : ''}` }),
-          h('button', { class: 'open', type: 'button', 'aria-label': 'Open typeface ' + f.family, onclick: () => openDetail(t, [t]) }));
-      }))));
+    const tiles = fonts.map((f) => {
+      const pt = pseudoTrend('sig-font-' + f.family, f.new ? 'New release in use' : 'Recurring typeface', f.family,
+        `Credited in ${f.count} recent projects from ${f.sources.length} sources.`, f.sources, f.evidence,
+        { family: 'font', font: { family: f.family, provider: f.google ? 'google' : null } });
+      const spec = h('div', { class: 'spec' + (f.google ? '' : ' nofont ready') }, h('div', { class: 'big', text: f.family }),
+        h('div', { class: 'line', text: f.google ? 'Hamburgefonstiv 0123' : 'Preview not available' }));
+      if (f.google) liveFont(spec, { family: f.family }, f.family + 'Hamburgefonstiv 0123');
+      const media = h('div', { class: 'media specimen', 'aria-hidden': 'true', vars: { '--ar': '5 / 4' } }, spec);
+      const sub = `In ${plural(f.count, 'project', 'projects')}, ${plural(f.sources.length, 'source', 'sources')}${f.new ? ', new on Google Fonts' : ''}`;
+      return plainTile(pt.id, media, f.family, sub, () => openDetail(pt, [pt]), 'font');
+    });
+    secs.push({ id: 'typefaces', title: 'Typefaces', n: tiles.length,
+      lede: 'Typefaces credited or named in recent projects (Fonts In Use, Typewolf, articles). Live previews load for Google Fonts families.',
+      body: h('div', { class: 'tgrid' }, stagger(tiles)) });
   }
-
   const radar = (sig.radar || []).slice(0, 12);
   if (radar.length) {
-    trendEl.append(sec('New on Google Fonts, gaining traction', "Families added in the last year, ordered by Google Fonts' own trending rank. This is Google's usage data, not Segnale's opinion.",
-      h('div', { class: 'rows' }, radar.map((f) => {
-        const url = 'https://fonts.google.com/specimen/' + encodeURIComponent(f.family).replace(/%20/g, '+');
-        const item = S.items.find((x) => x.url === url) || {
-          id: 'gf-' + f.family, sid: 'googlefonts', url, title: f.family, author: (f.designers || []).join(', '), date: f.dateAdded || S.index.generatedAt,
-          dateType: 'release', category: 'type', categories: ['type'], kind: 'release', font: { ...f, provider: 'google' },
-          reasons: [`Google Fonts trending rank #${f.trending}`], why: `Google Fonts trending rank #${f.trending}`,
-        };
-        const ff = liveFont(h('span', { class: 'ff', text: f.family }), f, f.family);
-        return h('div', { class: 'row font' }, ff,
-          h('small', { text: `Trending #${f.trending}${f.dateAdded ? ', added ' + fmtShort.format(new Date(f.dateAdded)) : ''}${f.designers && f.designers.length ? ', ' + f.designers.slice(0, 2).join(', ') : ''}` }),
-          h('button', { class: 'open', type: 'button', 'aria-label': 'Open ' + f.family, onclick: () => openDetail(item, [item]) }));
-      }))));
+    const tiles = radar.map((f) => {
+      const url = 'https://fonts.google.com/specimen/' + encodeURIComponent(f.family).replace(/%20/g, '+');
+      const item = S.items.find((x) => x.url === url) || {
+        id: 'gf-' + f.family, sid: 'googlefonts', url, title: f.family, author: (f.designers || []).join(', '), date: f.dateAdded || S.index.generatedAt,
+        dateType: 'release', category: 'type', categories: ['type'], kind: 'release', font: { ...f, provider: 'google' },
+        reasons: [`Google Fonts trending rank #${f.trending}`], why: `Google Fonts trending rank #${f.trending}`,
+      };
+      const sub = `Trending #${f.trending}${f.dateAdded ? ', added ' + fmtShort.format(new Date(f.dateAdded)) : ''}`;
+      return plainTile('r-' + f.family, specimen(f, '5 / 4'), f.family, sub, () => openDetail(item, [item]), 'font');
+    });
+    secs.push({ id: 'googlefonts', title: 'New on Google Fonts', n: tiles.length,
+      lede: "Families added in the last year, ordered by Google Fonts' own trending rank. This is Google's usage data, not DSGNBRD's opinion.",
+      body: h('div', { class: 'tgrid' }, stagger(tiles)) });
   }
-
-  const cov = (sig.coverage || []).slice(0, 10);
+  const cov = (sig.coverage || []).slice(0, 12);
   if (cov.length) {
-    trendEl.append(sec('Covered everywhere', 'The same project published by several independent sources in the last three weeks.',
-      h('div', { class: 'rows' }, cov.map((c) => {
-        const it = S.byId.get(c.id);
-        return h('div', { class: 'row' },
-          h('span', { class: 'sw', vars: { '--c': 'var(--carbon)' } }, c.image ? h('img', { alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', src: c.image.src, style: 'width:100%;height:100%;object-fit:cover;border-radius:3px', onerror: (e) => e.target.remove() }) : null),
-          h('span', {}, h('span', { class: 't', text: c.title }), h('small', { text: `${c.sources.length} sources: ${srcList(c.sources, 4)}` })),
-          h('span'),
-          h('button', { class: 'open', type: 'button', 'aria-label': 'Open ' + c.title, onclick: () => (it ? openDetail(it, [it]) : window.open(c.url, '_blank', 'noopener')) }));
-      }))));
+    const tiles = cov.map((c) => {
+      const it = S.byId.get(c.id);
+      const base = it || { id: 'cov-' + c.id, title: c.title, image: c.image, sid: c.sid, url: c.url };
+      const title = it ? shortOf(it).s : c.title;
+      return plainTile('cov-' + c.id, mediaEl(base), title, `${c.sources.length} sources: ${srcList(c.sources, 3)}`,
+        () => (it ? openDetail(it, [it]) : window.open(c.url, '_blank', 'noopener')));
+    });
+    secs.push({ id: 'coverage', title: 'Covered everywhere', n: tiles.length,
+      lede: 'The same project published by several independent sources in the last three weeks.',
+      body: h('div', { class: 'tgrid' }, stagger(tiles)) });
   }
-
-  const ph = (sig.phrases || []).slice(0, 14);
+  const ph = (sig.phrases || []).slice(0, 16);
   if (ph.length) {
-    trendEl.append(sec('In the conversation', 'Word pairs that recur in titles across different sources. Raw frequency, useful for spotting events and subjects. Tap one to search it.',
-      h('div', { class: 'phrases' }, ph.map((p) => h('button', { type: 'button', onclick: () => searchFor(p.phrase) }, p.phrase, h('small', { text: String(p.count) }))))));
+    secs.push({ id: 'conversation', title: 'In the conversation', n: ph.length,
+      lede: 'Word pairs that recur in titles across different sources. Raw frequency, useful for spotting events and subjects. Tap one to search it.',
+      body: h('div', { class: 'phrases' }, ph.map((p) => h('button', { type: 'button', onclick: () => searchFor(p.phrase) }, p.phrase, h('small', { text: String(p.count) })))) });
   }
-
   const cons = (idx.trends || []).filter((t) => t.label === 'Consolidated').map(asTrend);
   if (cons.length) {
-    trendEl.append(sec('Consolidated', 'Still everywhere, but not new: present at a steady rate in both the recent window and the weeks before.',
-      h('div', { class: 'tgrid' }, cons.map((t) => trendCard(t, cons)))));
+    secs.push({ id: 'consolidated', title: 'Consolidated', n: cons.length,
+      lede: 'Still everywhere, but not new: present at a steady rate in both the recent window and the weeks before.',
+      body: h('div', { class: 'tgrid wide' }, stagger(cons.map((t) => trendTile(t, cons)))) });
+  }
+
+  const lede = b.ok
+    ? `Built from ${b.recentItems} items published in the last ${days} days, compared with ${b.baselineItems} items from the ${b.baseDays - days} days before.`
+    : `Built from ${b.recentItems} items published in the last ${days} days. DSGNBRD measures growth once it has three weeks of its own history; until then a pattern means recurrence across independent sources, not proven growth.`;
+  trendEl.append(h('header', { class: 'tr-head' }, h('h1', { text: 'Trending now' }), h('p', { text: lede }),
+    secs.length > 1 ? h('nav', { class: 'tr-nav', 'aria-label': 'Sections' },
+      secs.map((s) => h('button', { type: 'button', onclick: () => jumpTo('ts-' + s.id) }, s.title, h('small', { text: String(s.n) })))) : null));
+  for (const s of secs) {
+    trendEl.append(h('section', { class: 'tsec', id: 'ts-' + s.id, 'aria-labelledby': 'tsh-' + s.id },
+      h('header', { class: 'tsec-head' }, h('h2', { id: 'tsh-' + s.id, text: s.title }), h('span', { class: 'n', text: String(s.n) })),
+      s.lede ? h('p', { class: 'lede', text: s.lede }) : null, s.body));
+  }
+  if (!secs.length) {
+    trendEl.append(h('div', { class: 'empty' }, h('h2', { text: 'No signals yet' }),
+      h('p', { text: 'Patterns need at least four items from three independent sources. They appear here after a few runs of the update.' })));
   }
 }
-function asTrend(t) { return { ...t, type: 'trend', date: t.firstDetected }; }
 
-// Pannello fonti e preferenze
+// ───────────────────────────────────────────── pannello fonti e preferenze
 function renderPanel() {
   const body = $('#panelBody');
   body.textContent = '';
   const idx = S.index;
   const w = h('div', { class: 'wrap' });
-  w.append(h('button', { class: 'icon close', type: 'button', 'aria-label': 'Close', onclick: () => panel.close(), style: 'position:absolute;top:14px;right:14px' }, icon('close')));
+  w.append(h('button', { class: 'icon close', type: 'button', 'aria-label': 'Close', onclick: () => closeDialog(panel), style: 'position:absolute;top:14px;right:14px' }, icon('close')));
   w.append(h('h2', { text: 'Sources and preferences' }));
   if (idx) {
     const ok = idx.sources.filter((s) => s.status && s.status.ok).length;
     w.append(h('p', { text: `Last update ${fullDate(idx.generatedAt)} at ${new Date(idx.generatedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}. ${idx.stats.items} items in the last ${idx.retentionDays} days, ${ok} of ${idx.sources.length} automatic sources answered.` }));
   }
+  put(w, installBlock());
 
-  w.append(h('h3', { text: 'Categories in All' }), h('p', { text: 'More pushes a category up inside each day, Less and Off thin it out. Choosing a category from the filter bar always shows everything in it.' }));
+  w.append(h('h3', { text: 'Appearance' }), h('div', { class: 'prefs' }, h('div', { class: 'row' }, h('span', { text: 'Theme' }),
+    h('div', { class: 'seg', role: 'group', 'aria-label': 'Theme' },
+      [['night', 'Night'], ['day', 'Day'], ['system', 'Auto']].map(([v, l]) => h('button', {
+        type: 'button', 'aria-pressed': String(S.themePref === v), text: l,
+        onclick: () => { setThemePref(v); renderPanel(); },
+      }))))));
+
+  w.append(h('h3', { text: 'Categories in All' }), h('p', { text: 'More pushes a category up inside each day, Less and Off thin it out. Choosing a category from the wheel always shows everything in it.' }));
   const prefs = h('div', { class: 'prefs' });
   for (const [k, label] of CATS.filter(([k]) => !['all', 'trends'].includes(k))) {
     const cur = S.prefs[k] || 'normal';
     prefs.append(h('div', { class: 'row' }, h('span', { text: label }),
       h('div', { class: 'seg', role: 'group', 'aria-label': label },
         ['more', 'normal', 'less', 'off'].map((v) => h('button', {
-          type: 'button', 'aria-pressed': String(cur === v), text: v[0].toUpperCase() + v.slice(1),
+          type: 'button', 'aria-pressed': String(cur === v), text: cap1(v),
           onclick: () => { if (v === 'normal') delete S.prefs[k]; else S.prefs[k] = v; store.set('prefs', S.prefs); renderPanel(); S.dirty = true; },
         })))));
   }
@@ -1091,7 +1181,7 @@ function renderPanel() {
   }
 
   if (idx) {
-    w.append(h('h3', { text: 'Automatic sources' }), h('p', { text: 'Read two or three times a day by the update job. Turn a source off to hide its items on this device.' }));
+    w.append(h('h3', { text: 'Automatic sources' }), h('p', { text: 'Read three times a day by the update job. Turn a source off to hide its items on this device.' }));
     const list = h('div', {});
     for (const s of [...idx.sources].sort((a, b) => a.name.localeCompare(b.name))) {
       const st = s.status || {};
@@ -1110,68 +1200,451 @@ function renderPanel() {
       w.append(h('h3', { text: 'Check these by hand' }), h('p', { text: 'Worth following, but they block automated reading, have no feed, or have gone quiet. Checked on 25 September 2026.' }),
         h('div', { class: 'manual' }, h('ul', {}, idx.manual.map((m) => h('li', {}, h('a', { href: m.url, target: '_blank', rel: 'noopener noreferrer', text: m.name }), h('small', { text: m.reason }))))));
     }
-    w.append(h('h3', { text: 'The colour bar' }), h('p', { text: 'The strip under the name is built from the lead images of the latest projects: one patch per project, its dominant colour, sorted by hue. Tap a patch to open the project.' }));
   }
   body.append(w);
 }
 
-// barra colore
-function renderColourBar() {
-  const bar = $('#colourbar');
-  bar.textContent = '';
-  const cb = S.index && S.index.colourBar;
-  const segs = (cb && cb.segments) || [];
-  segs.forEach((s, i) => {
-    bar.append(h('button', {
-      type: 'button', title: `${s.title}, ${srcName(s.sid)}`, 'aria-label': `${s.hex} from ${s.title}`, vars: { '--c': s.hex, '--i': i },
-      onclick: () => { const it = S.byId.get(s.id); if (it) openDetail(it, segs.map((x) => S.byId.get(x.id)).filter(Boolean)); },
-    }));
-  });
-  if (segs.length) {
-    const hrs = cb.hours;
-    bar.append(h('span', { class: 'cap', text: hrs <= 24 ? 'Colour of the last 24 hours' : hrs <= 72 ? `Colour of the last ${hrs} hours` : 'Colour of the week' }));
-    bar.classList.add('tune');
-  }
+// ───────────────────────────────────────────── installazione come app (WebAPK su Android)
+let installEvt = null;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installEvt = e;
+  $('#installBtn').hidden = false;
+});
+window.addEventListener('appinstalled', () => {
+  installEvt = null;
+  $('#installBtn').hidden = true;
+  toast('Installed. DSGNBRD is now in your apps.');
+});
+async function installApp() {
+  if (!installEvt) return;
+  const evt = installEvt;
+  installEvt = null;
+  $('#installBtn').hidden = true;
+  evt.prompt();
+  try {
+    const { outcome } = await evt.userChoice;
+    if (outcome !== 'accepted') toast('Not installed. You can do it later from the browser menu.');
+  } catch { /* il browser ha chiuso il dialogo */ }
+  if (panel.open) renderPanel();
+}
+function installBlock() {
+  if (isStandalone()) return null;
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const how = installEvt ? 'Its own icon and window, and it opens offline with the last feed it downloaded.'
+    : ios ? 'On iPad or iPhone: Share, then Add to Home Screen.'
+      : 'In Chrome on Android: open the menu (three dots), then Install app. In Samsung Internet: menu, then Add page to, then Home screen.';
+  return [h('h3', { text: 'Install as an app' }), h('p', { text: how }),
+    installEvt ? h('p', {}, h('button', { class: 'btn primary', type: 'button', text: 'Install app', onclick: installApp })) : null];
 }
 
-// ───────────────────────────────────────────── avvio
-function bindChrome() {
-  const cats = $('#cats');
-  for (const [k, label] of CATS) {
-    cats.append(h('button', {
-      type: 'button', 'data-cat': k, 'aria-pressed': String(k === S.cat), text: label,
-      onclick: (e) => {
-        S.cat = k;
-        for (const b of $$('button', cats)) b.setAttribute('aria-pressed', String(b.dataset.cat === k));
-        e.currentTarget.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
-        if (S.view !== 'feed') setView('feed');
-        rebuild();
-      },
-    }));
+// ───────────────────────────────────────────── tema giorno / notte
+const themeMQ = matchMedia('(prefers-color-scheme: light)');
+const resolveTheme = (pref) => (pref === 'day' || pref === 'night' ? pref : themeMQ.matches ? 'day' : 'night');
+function applyTheme(pref) {
+  S.themePref = pref === 'day' || pref === 'night' ? pref : 'system';
+  const t = resolveTheme(S.themePref);
+  document.documentElement.setAttribute('data-theme', t);
+  const m = $('meta[name="theme-color"]');
+  if (m) m.setAttribute('content', t === 'day' ? '#e9e0d2' : '#232220');
+  $('#themeBtn').setAttribute('aria-label', t === 'day' ? 'Switch to night mode' : 'Switch to day mode');
+}
+function setThemePref(pref) { store.set('theme', pref); applyTheme(pref); }
+
+// ───────────────────────────────────────────── ruota delle categorie
+// Tieni premuta la maniglia: la ruota si apre sotto il dito, scegli con la direzione e rilasci.
+// Tocco veloce: la ruota resta aperta, si gira trascinando (o con rotella/frecce) e si tocca la voce.
+function initWheel() {
+  const root = $('#wheel');
+  const handle = $('#catHandle');
+  const disc = $('.disc', root), hub = $('.hub', root), needle = $('.needle', root), ring = $('.ring', root), spokesEl = $('.spokes', root);
+  const N = CATS.length;
+  const ease = (x) => 1 - Math.pow(1 - x, 3);
+  let G = null, rot = 0, target = null, hi = -1, mode = null, pend = null, autoV = 0, raf = 0, openT = 0, lastT = 0;
+  let spin = null, ptype = 'mouse', ringG = null, ticks = [], fx = 0, fy = 0;
+  const labels = CATS.map(([, label], i) => h('button', { class: 'spoke', type: 'button', role: 'menuitemradio', tabindex: '-1', 'data-i': i, text: label }));
+  spokesEl.append(...labels);
+
+  function geom() {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const R = clamp(Math.min(vh * 0.46, vw * 0.88), 220, 400);
+    const rl = R * 0.6;
+    const r = handle.getBoundingClientRect();
+    const hy = r.height ? r.top + r.height / 2 : vh / 2;
+    const A = 72, s = R >= 330 ? 19 : 22;
+    const cy = vh > rl * 2.3 ? clamp(hy, rl * 1.08, vh - rl * 1.08) : vh / 2;
+    return { R, rl, A, s, cy, hubR: Math.round(Math.max(34, R * 0.12)), dead: Math.max(50, R * 0.2), rotMin: A - (N - 1) * s, rotMax: -A };
   }
+  function layout() {
+    G = geom();
+    const { R, cy, hubR, s } = G;
+    root.style.setProperty('--wf', clamp(R * 0.043, 15, 18).toFixed(1) + 'px');
+    Object.assign(disc.style, { width: 2 * R + 'px', height: 2 * R + 'px', left: -R + 'px', top: cy - R + 'px' });
+    Object.assign(hub.style, { width: 2 * hubR + 'px', height: 2 * hubR + 'px', left: -hubR + 'px', top: cy - hubR + 'px' });
+    needle.style.top = cy + 'px';
+    needle.style.width = Math.round(G.rl - 22) + 'px';
+    ring.setAttribute('width', 2 * R);
+    ring.setAttribute('height', 2 * R);
+    ring.setAttribute('viewBox', `${-R} ${-R} ${2 * R} ${2 * R}`);
+    Object.assign(ring.style, { left: -R + 'px', top: cy - R + 'px' });
+    ring.textContent = '';
+    ringG = document.createElementNS(SVGNS, 'g');
+    ticks = [];
+    const minor = s / 2;
+    // tacche su tutta la corsa della ruota: una lunga per voce, una corta in mezzo (texture da ghiera)
+    for (let k = -8; k * minor <= (N - 1) * s + 100; k++) {
+      const a = (k * minor * Math.PI) / 180;
+      const item = k % 2 === 0 ? k / 2 : -1;
+      const major = item >= 0 && item < N;
+      const r1 = R - (major ? 20 : 11), r2 = R - 6;
+      const ln = document.createElementNS(SVGNS, 'line');
+      ln.setAttribute('x1', (r1 * Math.cos(a)).toFixed(1)); ln.setAttribute('y1', (r1 * Math.sin(a)).toFixed(1));
+      ln.setAttribute('x2', (r2 * Math.cos(a)).toFixed(1)); ln.setAttribute('y2', (r2 * Math.sin(a)).toFixed(1));
+      if (major) { ln.setAttribute('class', 'major'); ticks[item] = ln; }
+      ringG.append(ln);
+    }
+    ring.append(ringG);
+  }
+  const angleOf = (i) => i * G.s + rot;
+  const angleAt = (x, y) => (Math.atan2(y - G.cy, Math.max(x, 0.001)) * 180) / Math.PI;
+  function draw(now) {
+    const { rl, A, s, cy } = G;
+    const t = motionOK() ? now - openT : 1e9;
+    for (let i = 0; i < N; i++) {
+      const th = angleOf(i);
+      const vis = clamp(1 - (Math.abs(th) - A) / s, 0, 1);
+      const slot = clamp((th + A) / s, 0, 10);
+      const p = t > 900 ? 1 : ease(clamp((t - slot * 24) / 300, 0, 1));
+      const r = rl * (0.86 + 0.14 * p);
+      const rad = (th * Math.PI) / 180;
+      const el = labels[i];
+      el.style.transform = `translate(${(r * Math.cos(rad)).toFixed(1)}px, ${(cy + r * Math.sin(rad)).toFixed(1)}px) translateY(-50%)`;
+      el.style.opacity = (vis * p).toFixed(3);
+      el.style.visibility = vis > 0.02 ? 'visible' : 'hidden'; // solo la rotazione nasconde: durante l'apertura resta focalizzabile
+      el.classList.toggle('hi', i === hi);
+    }
+    if (ringG) ringG.setAttribute('transform', `rotate(${rot.toFixed(2)})`);
+    ticks.forEach((tk, i) => { if (tk) tk.classList.toggle('hi', i === hi); });
+  }
+  function setHi(i) {
+    if (i === hi) return;
+    hi = i;
+    if (mode === 'hold' && i >= 0 && ptype === 'touch') buzz(4);
+  }
+  function nearest(phi, tol) {
+    let best = -1, bd = Infinity;
+    for (let i = 0; i < N; i++) {
+      const th = angleOf(i);
+      if (Math.abs(th) > G.A + G.s * 0.5) continue;
+      const dd = Math.abs(th - phi);
+      if (dd < bd) { bd = dd; best = i; }
+    }
+    return bd <= tol ? best : -1;
+  }
+  function pick() {
+    const dy = fy - G.cy, d = Math.hypot(fx, dy);
+    const phi = angleAt(fx, fy);
+    setHi(d >= G.dead ? nearest(phi, 90) : -1);
+    // vicino ai bordi dell'arco la ruota scorre da sola verso le voci nascoste
+    const edge = G.A - G.s * 0.4;
+    autoV = d >= G.dead && Math.abs(phi) > edge ? -Math.sign(phi) * clamp((Math.abs(phi) - edge) * 7, 30, 170) : 0;
+    needle.style.opacity = d >= G.dead ? '1' : '0';
+    needle.style.transform = `rotate(${phi.toFixed(1)}deg)`;
+  }
+  function loop(now) {
+    raf = 0;
+    if (!mode) return;
+    const dt = lastT ? Math.min(0.05, (now - lastT) / 1000) : 0;
+    lastT = now;
+    if (mode === 'hold' && autoV) {
+      const before = rot;
+      rot = clamp(rot + autoV * dt, G.rotMin, G.rotMax);
+      if (rot !== before) pick();
+    }
+    if (target != null) {
+      const d = target - rot;
+      if (Math.abs(d) < 0.05) { rot = target; target = null; } else rot += d * Math.min(1, dt * 12);
+    }
+    if (spin && !spin.active && spin.v) {
+      rot = clamp(rot + spin.v * dt, G.rotMin, G.rotMax);
+      spin.v *= Math.pow(0.015, dt);
+      if (Math.abs(spin.v) < 4 || rot === G.rotMin || rot === G.rotMax) spin.v = 0;
+    }
+    draw(now);
+    raf = requestAnimationFrame(loop);
+  }
+  function open(m) {
+    if (mode) return;
+    mode = m;
+    layout();
+    const cur = Math.max(0, CATS.findIndex(([k]) => k === S.cat));
+    rot = clamp(-cur * G.s, G.rotMin, G.rotMax);
+    hi = m === 'sticky' ? cur : -1;
+    target = null; spin = null; autoV = 0;
+    labels.forEach((el, i) => {
+      el.classList.toggle('cur', i === cur);
+      el.classList.remove('chosen');
+      el.setAttribute('aria-checked', String(i === cur));
+    });
+    root.hidden = false;
+    root.classList.remove('closing');
+    document.body.classList.add('wheel-on');
+    handle.setAttribute('aria-expanded', 'true');
+    openT = performance.now(); lastT = 0;
+    draw(openT);
+    void root.offsetWidth;
+    root.classList.add('open');
+    if (!raf) raf = requestAnimationFrame(loop);
+    if (m === 'sticky') labels[cur].focus({ preventScroll: true });
+    hideHint();
+  }
+  function close() {
+    if (!mode) return;
+    const wasSticky = mode === 'sticky';
+    mode = null; autoV = 0; target = null; spin = null;
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    root.classList.remove('open');
+    handle.setAttribute('aria-expanded', 'false');
+    document.body.classList.remove('wheel-on');
+    needle.style.opacity = '0';
+    if (motionOK()) {
+      root.classList.add('closing');
+      setTimeout(() => { if (!mode) { root.hidden = true; root.classList.remove('closing'); } }, 220);
+    } else {
+      root.hidden = true;
+    }
+    if (wasSticky) handle.focus({ preventScroll: true });
+  }
+  function commit(i) {
+    if (i < 0) { close(); return; }
+    const k = CATS[i][0];
+    labels[i].classList.add('chosen');
+    if (ptype === 'touch') buzz(10);
+    setTimeout(() => { close(); if (k !== S.cat) setCat(k); }, motionOK() ? 130 : 0);
+  }
+  function ensureVisible(i) {
+    const lim = G.A - G.s * 0.5, th = angleOf(i);
+    if (th > lim) target = clamp(rot - (th - lim), G.rotMin, G.rotMax);
+    else if (th < -lim) target = clamp(rot + (-lim - th), G.rotMin, G.rotMax);
+  }
+
+  // maniglia: premi e tieni (o trascina) per il gesto; tocco breve per la ruota fissa
+  function startHold() {
+    if (!pend || pend.holding) return;
+    clearTimeout(pend.timer);
+    pend.holding = true;
+    open('hold');
+    fx = pend.lx != null ? pend.lx : pend.x;
+    fy = pend.ly != null ? pend.ly : pend.y;
+    pick();
+    if (ptype === 'touch') buzz(8);
+  }
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || mode) return;
+    e.preventDefault();
+    ptype = e.pointerType || 'mouse';
+    try { handle.setPointerCapture(e.pointerId); } catch { /* ok */ }
+    handle.classList.add('pressed');
+    pend = { id: e.pointerId, x: e.clientX, y: e.clientY, holding: false };
+    pend.timer = setTimeout(startHold, 260);
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (!pend || e.pointerId !== pend.id) return;
+    pend.lx = e.clientX; pend.ly = e.clientY;
+    if (!pend.holding) {
+      if (Math.hypot(e.clientX - pend.x, e.clientY - pend.y) > 10) startHold();
+      return;
+    }
+    fx = e.clientX; fy = e.clientY;
+    pick();
+  });
+  handle.addEventListener('pointerup', (e) => {
+    if (!pend || e.pointerId !== pend.id) return;
+    handle.classList.remove('pressed');
+    clearTimeout(pend.timer);
+    const holding = pend.holding;
+    pend = null;
+    if (!holding) { open('sticky'); return; }
+    if (mode === 'hold') commit(hi);
+  });
+  handle.addEventListener('pointercancel', () => {
+    if (pend) clearTimeout(pend.timer);
+    pend = null;
+    handle.classList.remove('pressed');
+    if (mode === 'hold') close();
+  });
+  handle.addEventListener('contextmenu', (e) => e.preventDefault());
+  handle.addEventListener('click', (e) => e.preventDefault());
+  handle.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight') { e.preventDefault(); ptype = 'keyboard'; open('sticky'); }
+  });
+
+  // ruota fissa: trascina per girarla (con un po' di inerzia), tocca una voce per sceglierla
+  root.addEventListener('pointerdown', (e) => {
+    if (mode !== 'sticky') return;
+    e.preventDefault();
+    ptype = e.pointerType || 'mouse';
+    const d = Math.hypot(e.clientX, e.clientY - G.cy);
+    const spoke = e.target.closest('.spoke');
+    if (!spoke && d > G.R + 6) { spin = { outside: true, id: e.pointerId }; return; }
+    try { root.setPointerCapture(e.pointerId); } catch { /* ok */ }
+    const a = angleAt(e.clientX, e.clientY);
+    spin = { active: true, id: e.pointerId, a0: a, r0: rot, last: a, t: performance.now(), v: 0, moved: false, sx: e.clientX, sy: e.clientY, spoke, d };
+    target = null;
+  });
+  root.addEventListener('pointermove', (e) => {
+    if (mode !== 'sticky') return;
+    if (!spin || !spin.active || e.pointerId !== spin.id) {
+      if (e.pointerType === 'mouse') { const sp = e.target.closest('.spoke'); if (sp) setHi(Number(sp.dataset.i)); }
+      return;
+    }
+    if (!spin.moved && Math.hypot(e.clientX - spin.sx, e.clientY - spin.sy) < 8) return;
+    spin.moved = true;
+    const a = angleAt(e.clientX, e.clientY), now = performance.now();
+    spin.v = ((a - spin.last) / Math.max(8, now - spin.t)) * 1000;
+    spin.last = a; spin.t = now;
+    rot = clamp(spin.r0 + (a - spin.a0), G.rotMin, G.rotMax);
+  });
+  root.addEventListener('pointerup', (e) => {
+    if (!spin || e.pointerId !== spin.id) return;
+    const s = spin;
+    if (s.outside) { spin = null; close(); return; }
+    s.active = false;
+    if (s.moved) return;
+    spin = null;
+    if (s.spoke) { commit(Number(s.spoke.dataset.i)); return; }
+    if (s.d < G.dead) { close(); return; }
+    const i = nearest(angleAt(e.clientX, e.clientY), G.s * 0.6);
+    if (i >= 0) commit(i);
+  });
+  root.addEventListener('pointercancel', () => { if (spin) spin.active = false; });
+  root.addEventListener('wheel', (e) => {
+    if (!mode) return;
+    e.preventDefault();
+    rot = clamp(rot - e.deltaY * 0.12, G.rotMin, G.rotMax);
+    target = null;
+  }, { passive: false });
+  root.addEventListener('keydown', (e) => {
+    if (!mode) return;
+    const cur = hi >= 0 ? hi : Math.max(0, CATS.findIndex(([k]) => k === S.cat));
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
+      e.preventDefault();
+      const i = e.key === 'Home' ? 0 : e.key === 'End' ? N - 1 : clamp(cur + (e.key === 'ArrowDown' ? 1 : -1), 0, N - 1);
+      setHi(i);
+      ensureVisible(i);
+      labels[i].focus({ preventScroll: true });
+    } else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); commit(cur); }
+    else if (e.key === 'Tab') e.preventDefault();
+  });
+  window.addEventListener('resize', () => { if (mode) { layout(); draw(performance.now() + 1e4); } });
+  return { open, close, isOpen: () => !!mode };
+}
+function showHint() {
+  if (store.get('wheelHint', 0) || S.view !== 'feed' || (S.wheel && S.wheel.isOpen())) return;
+  const hint = $('#wheelHint'), handle = $('#catHandle');
+  const r = handle.getBoundingClientRect();
+  hint.style.top = r.top + r.height / 2 + 'px';
+  hint.hidden = false;
+  requestAnimationFrame(() => hint.classList.add('on'));
+  if (motionOK()) restart(handle, 'nudge');
+  store.set('wheelHint', 1);
+  setTimeout(hideHint, 5200);
+}
+function hideHint() {
+  const hint = $('#wheelHint');
+  if (hint.hidden) return;
+  hint.classList.remove('on');
+  setTimeout(() => { hint.hidden = true; }, 450);
+}
+
+// ───────────────────────────────────────────── pressione lunga su una card = salva / togli
+function bindLongPress(host) {
+  let lp = null;
+  const clear = () => { if (!lp) return; clearTimeout(lp.timer); clearTimeout(lp.t2); lp.tile.classList.remove('holding'); };
+  function fire() {
+    if (!lp || lp.fired) return;
+    clear();
+    lp.fired = true;
+    const it = findItem(lp.tile.dataset.id);
+    if (it) { toggleSave(it); if (lp.type === 'touch') buzz(12); }
+    const done = lp;
+    setTimeout(() => { if (lp === done) lp = null; }, 700);
+  }
+  host.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const t = e.target.closest('.tile[data-id]');
+    if (!t || t.hasAttribute('data-nosave')) { lp = null; return; }
+    lp = { tile: t, x: e.clientX, y: e.clientY, fired: false, type: e.pointerType };
+    lp.t2 = setTimeout(() => { if (lp && !lp.fired && motionOK()) lp.tile.classList.add('holding'); }, 140);
+    lp.timer = setTimeout(fire, 520);
+  });
+  host.addEventListener('pointermove', (e) => {
+    if (lp && !lp.fired && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 9) { clear(); lp = null; }
+  }, { passive: true });
+  host.addEventListener('pointerup', () => { if (lp && !lp.fired) { clear(); lp = null; } });
+  host.addEventListener('pointercancel', () => { if (lp && !lp.fired) { clear(); lp = null; } });
+  host.addEventListener('contextmenu', (e) => {
+    const t = e.target.closest('.tile[data-id]');
+    if (t && lp && lp.tile === t) { e.preventDefault(); fire(); }
+  });
+  host.addEventListener('click', (e) => {
+    if (lp && lp.fired) { e.preventDefault(); e.stopPropagation(); lp = null; }
+  }, true);
+}
+
+// ───────────────────────────────────────────── header: ricerca e scroll
+function openSearch(silent) {
+  const top = $('#top');
+  top.classList.add('searching');
+  top.classList.remove('away');
+  $('#searchBtn').setAttribute('aria-expanded', 'true');
+  if (!silent) setTimeout(() => $('#q').focus({ preventScroll: true }), 40);
+}
+function closeSearch(clear) {
+  const q = $('#q');
+  if (clear && q.value) { q.value = ''; S.q = ''; rebuild(); }
+  $('#top').classList.remove('searching');
+  $('#searchBtn').setAttribute('aria-expanded', 'false');
+}
+
+function bindChrome() {
   for (const b of $$('#period button')) b.addEventListener('click', () => setPeriod(Number(b.dataset.p)));
-  for (const b of $$('.views button')) b.addEventListener('click', () => setView(b.dataset.view));
-  $('#home').addEventListener('click', () => { if (S.view !== 'feed') setView('feed'); else window.scrollTo({ top: 0, behavior: 'smooth' }); });
+  for (const b of $$('.views button')) b.addEventListener('click', () => { if (b.dataset.view !== S.view) setView(b.dataset.view); });
+  $('#home').addEventListener('click', () => { if (S.view !== 'feed') setView('feed'); else window.scrollTo({ top: 0, behavior: motionOK() ? 'smooth' : 'auto' }); });
+  $('#catChip').addEventListener('click', () => setCat('all'));
+  $('#themeBtn').addEventListener('click', () => setThemePref(resolveTheme(S.themePref) === 'day' ? 'night' : 'day'));
+  themeMQ.addEventListener('change', () => { if (S.themePref === 'system') applyTheme('system'); });
   $('#focusBtn').addEventListener('click', () => {
     const list = S.view === 'saved' ? savedList() : flatList();
     if (list.length) openDetail(list[0], list);
   });
-  $('#sourcesBtn').addEventListener('click', () => { renderPanel(); panel.showModal(); });
-  panel.addEventListener('click', (e) => { if (e.target === panel) panel.close(); });
+  $('#sourcesBtn').addEventListener('click', () => { renderPanel(); panel.classList.remove('closing'); panel.showModal(); });
+  $('#installBtn').addEventListener('click', installApp);
+  panel.addEventListener('click', (e) => { if (e.target === panel) closeDialog(panel); });
+  panel.addEventListener('cancel', (e) => { e.preventDefault(); closeDialog(panel); });
   panel.addEventListener('close', () => { if (S.dirty) { S.dirty = false; rebuild(true); } });
+
   const q = $('#q');
+  $('#searchBtn').addEventListener('click', () => ($('#top').classList.contains('searching') ? closeSearch(false) : openSearch()));
+  $('#searchClose').addEventListener('click', () => { closeSearch(true); $('#searchBtn').focus({ preventScroll: true }); });
   q.addEventListener('input', debounce(async () => {
     S.q = norm(q.value.trim());
     if (S.q) await loadAll();
     if (S.view !== 'feed') setView('feed');
     rebuild();
   }, 180));
+  q.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeSearch(true); $('#searchBtn').focus({ preventScroll: true }); } });
+  q.addEventListener('blur', () => { if (!q.value.trim()) setTimeout(() => { if (document.activeElement !== q && !q.value.trim()) closeSearch(false); }, 150); });
+
+  sheet.addEventListener('cancel', (e) => { e.preventDefault(); closeSheet(); });
   sheet.addEventListener('close', () => {
     $('#sheetBody').textContent = '';
     if (history.state && history.state.sheet) history.back();
   });
-  window.addEventListener('popstate', () => { if (sheet.open) sheet.close(); });
-  // scorciatoie a livello documento: dopo Next/Prev il focus non deve "perdersi" fuori dalla scheda
+  window.addEventListener('popstate', () => { if (sheet.open) closeSheet(); });
   document.addEventListener('keydown', (e) => {
     const typing = e.target.closest && e.target.closest('input, textarea, [contenteditable]');
     if (sheet.open) {
@@ -1179,18 +1652,23 @@ function bindChrome() {
       const it = S.dlist[S.didx];
       if (e.key === 'ArrowRight') { step(1); e.preventDefault(); }
       else if (e.key === 'ArrowLeft') { step(-1); e.preventDefault(); }
-      else if (e.key === 's' && it) toggleSave(it);
+      else if (e.key === 's' && it && !String(it.id).startsWith('sig-')) toggleSave(it);
       else if (e.key === 'o' && it && it.url) { learn(it, 0.5); window.open(it.url, '_blank', 'noopener'); }
       return;
     }
-    if (e.key === '/' && !typing && !panel.open) { e.preventDefault(); $('#top').classList.remove('away'); q.focus(); }
+    if (panel.open || (S.wheel && S.wheel.isOpen()) || typing) return;
+    if (e.key === '/') { e.preventDefault(); openSearch(); }
   });
+
   let lastY = window.scrollY;
   window.addEventListener('scroll', () => {
     const y = window.scrollY;
     const top = $('#top');
-    if (y > lastY + 6 && y > 260) top.classList.add('away');
-    else if (y < lastY - 6 || y < 140) top.classList.remove('away');
+    top.classList.toggle('scrolled', y > 8);
+    if (!top.classList.contains('searching')) {
+      if (y > lastY + 6 && y > 260) top.classList.add('away');
+      else if (y < lastY - 6 || y < 140) top.classList.remove('away');
+    }
     lastY = y;
   }, { passive: true });
   window.addEventListener('resize', debounce(relayout, 160));
@@ -1203,13 +1681,17 @@ function bindChrome() {
       if (idx.generatedAt !== S.index.generatedAt) toast('New items are available', 'Refresh', () => location.reload());
     } catch { /* offline: pazienza */ }
   });
+  bindLongPress($('#main'));
 }
 
+// ───────────────────────────────────────────── avvio
 async function init() {
+  applyTheme(store.get('theme', 'system'));
   const prev = store.get('lastVisit', null);
   S.since = prev ? Date.parse(prev) : null;
   store.set('lastVisit', new Date().toISOString());
   bindChrome();
+  S.wheel = initWheel();
   syncSave('');
   feedEl.append(h('div', { class: 'cols', 'aria-hidden': 'true', style: 'padding-top:40px' },
     [0, 1, 2].slice(0, colCount()).map((i) => h('div', { class: 'col' }, [0, 1].map((j) => h('div', { class: 'skel', style: `height:${[260, 180, 320, 220, 280, 200][i * 2 + j]}px` }))))));
@@ -1221,26 +1703,34 @@ async function init() {
     S.months = (idx.months || []).map((m) => m.id);
     S.trendItems = (idx.trends || []).filter((t) => t.label !== 'Consolidated').map(asTrend);
     await Promise.all(S.months.slice(0, 2).map((m) => loadMonth(m)));
-    renderColourBar();
     rebuild(true);
+    const want = new URLSearchParams(location.search).get('view'); // scorciatoie dell'icona (manifest)
+    if (want === 'trending' || want === 'saved') setView(want);
     const id = decodeURIComponent(location.hash.slice(1));
     if (id) {
       history.replaceState(null, '', location.pathname + location.search);
       await loadAll();
-      const it = S.byId.get(id) || S.trendItems.find((t) => t.id === id);
+      const it = findItem(id);
       if (it) openDetail(it);
     }
+    setTimeout(showHint, 1600);
   } catch (e) {
     feedEl.textContent = '';
     const local = e.message === 'file';
     feedEl.append(h('div', { class: 'empty' },
-      h('h2', { text: local ? 'Open Segnale from a local server' : "Couldn't load the feed" }),
+      h('h2', { text: local ? 'Open DSGNBRD from a local server' : "Couldn't load the feed" }),
       h('p', { text: local ? 'Browsers block data files opened straight from disk. In the project folder run: python3 -m http.server 8000, then open http://localhost:8000'
         : `The data files did not load (${e.message}). If you are offline, the last copy loads once it has been cached; if this is a fresh install, run the pipeline once (see README).` }),
       local ? null : h('button', { class: 'btn', type: 'button', text: 'Try again', onclick: () => location.reload() })));
   }
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadController) toast('DSGNBRD was updated', 'Refresh', () => location.reload());
+    });
+  }
 }
 
-window.__segnale = S; // handle for debugging and automated tests
+window.__dsgnbrd = S; // appiglio per debug e test automatici
 init();

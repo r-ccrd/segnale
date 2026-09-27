@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Segnale · pipeline completa.
+"""DSGNBRD · pipeline completa.
 
 FEEDS → NORMALIZZAZIONE → QUALITY GATE → DEDUP → ARRICCHIMENTO → CLASSIFICAZIONE
       → CLUSTER CROSS-FONTE → RANKING → TREND → data/*.json
@@ -25,6 +25,7 @@ sys.path.insert(0, str(HERE))
 
 import rank  # noqa: E402
 import trends  # noqa: E402
+from describe import describe  # noqa: E402
 from classify import FontRadar, classify, cluster_duplicates, item_id, quality_gate  # noqa: E402
 from enrich import enrich_item  # noqa: E402
 from ingest import FETCHERS, iso  # noqa: E402
@@ -117,7 +118,7 @@ def main() -> int:
     rejected = state.setdefault("rejected", {})
     store = load_store()
     known = {dedup_key(it["url"]): it["id"] for it in store.values()}
-    log(f"Segnale · {iso(now)} · archivio {len(store)} item · fonti attive {len(active)}")
+    log(f"DSGNBRD · {iso(now)} · archivio {len(store)} item · fonti attive {len(active)}")
 
     # 1 ── FETCH (in parallelo; una fonte rotta non blocca le altre)
     status: dict[str, dict] = {}
@@ -228,8 +229,15 @@ def main() -> int:
     titles = {t["id"]: t["title"] for t in tr["trends"]}
     for it in items:
         rank.score_item(it, src_of(it), names, titles)
-    bar = trends.colour_bar(items, now)
     pcards = trends.palette_cards(items)
+    # descrizione breve delle card (soggetto + tipo), ricalcolata a ogni run:
+    # quando le regole migliorano, valgono anche per tutto l'archivio
+    for it in items:
+        d = describe(it)
+        it["short"] = {"s": d["s"], "k": d["k"]}
+    for pc in pcards:
+        src = store.get(pc.get("derivedFrom") or pc["id"][2:])
+        pc["short"] = {"s": ((src or {}).get("short") or {}).get("s") or pc["title"], "k": "Palette"}
 
     # 7 ── SCRITTURA: partizioni mensili (una riga per item = diff git leggibili)
     by_month: dict[str, list[dict]] = defaultdict(list)
@@ -263,10 +271,9 @@ def main() -> int:
         "sources": [{k: s[k] for k in ("id", "name", "home", "category", "type", "weight", "award", "note")
                      if k in s} | {"status": ss.get(s["id"], {}), "items": counts.get(s["id"], 0),
                                    "latest": latest.get(s["id"])}
-                    for s in cfg["sources"]],
+                    for s in cfg["sources"] if not s.get("disabled")],
         "manual": cfg.get("manual", []),
         "trends": tr["trends"], "signals": tr["signals"], "baseline": tr["baseline"],
-        "colourBar": bar,
     }
 
     # pulizia stato
