@@ -168,21 +168,21 @@ body.wheel-on .handle { opacity: 0; }
 .hint.on { opacity: 1; transform: translate(0, -50%); }
 .wheel { position: fixed; inset: 0; z-index: 60; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .wheel .scrim { position: absolute; inset: 0; background: var(--scrim); opacity: 0; transition: opacity .3s var(--ease); }
-.wheel.open .scrim { opacity: 1; }
+.wheel.on .scrim { opacity: 1; }
 .wheel.closing { opacity: 0; transition: opacity .2s var(--ease); }
 .disc, .hub { position: absolute; border-radius: 50%; }
 .disc {
   background: var(--tile); box-shadow: var(--shadow), inset 0 0 0 1px var(--edge);
   opacity: 0; transform: scale(.6) rotate(-14deg); transition: transform .55s var(--spring), opacity .25s var(--ease);
 }
-.wheel.open .disc { opacity: 1; transform: none; }
+.wheel.on .disc { opacity: 1; transform: none; }
 .ring { position: absolute; overflow: visible; pointer-events: none; opacity: 0; transition: opacity .35s .06s; }
-.wheel.open .ring { opacity: 1; }
+.wheel.on .ring { opacity: 1; }
 .ring line { stroke: var(--line); stroke-width: 1.4; stroke-linecap: round; transition: stroke .2s; }
 .ring line.major { stroke: var(--text-3); stroke-width: 1.6; }
 .ring line.hi { stroke: var(--text); stroke-width: 2.6; }
 .hub { background: var(--tile-2); box-shadow: inset 0 0 0 1px var(--edge); opacity: 0; transition: opacity .3s .05s, background-color .2s; }
-.wheel.open .hub { opacity: 1; }
+.wheel.on .hub { opacity: 1; }
 .needle {
   position: absolute; left: 0; height: 1.5px; margin-top: -.75px; background: var(--text-3); transform-origin: 0 50%;
   opacity: 0; transition: opacity .15s; pointer-events: none;

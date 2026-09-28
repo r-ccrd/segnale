@@ -1,6 +1,6 @@
-# Segnale: legge le fonti 3 volte al giorno, salva i dati nel repo e pubblica il sito su GitHub Pages.
-# Costo: zero su repo pubblici (runner standard GitHub). Un giro dura in media pochi minuti.
-name: Aggiorna Segnale
+# DSGNBRD: legge le fonti 3 volte al giorno, salva i dati nel repo e pubblica il sito su GitHub Pages.
+# Costo: zero su repo pubblici (runner standard GitHub). Un giro dura in media 1-3 minuti.
+name: Aggiorna DSGNBRD
 
 on:
   schedule:
@@ -16,7 +16,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: segnale
+  group: dsgnbrd
   cancel-in-progress: false
 
 jobs:
@@ -54,9 +54,18 @@ jobs:
             git push || (git pull --rebase && git push)
           fi
 
+      # Si pubblica solo quello che serve all'app: niente pipeline/, cache di Python, state.json, README e docs
+      - name: Prepara il sito
+        run: |
+          mkdir -p _site/data
+          cp index.html manifest.webmanifest sw.js .nojekyll _site/
+          cp -r assets _site/
+          if [ -f data/index.json ]; then cp data/index.json _site/data/; fi
+          if [ -d data/archive ]; then cp -r data/archive _site/data/; fi
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4

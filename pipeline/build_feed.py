@@ -4,6 +4,9 @@
 FEEDS → NORMALIZZAZIONE → QUALITY GATE → DEDUP → ARRICCHIMENTO → CLASSIFICAZIONE
       → CLUSTER CROSS-FONTE → RANKING → TREND → data/*.json
 
+Le prime quattro fasi girano in flusso: appena una fonte ha finito, i suoi item nuovi passano il filtro
+e vanno subito in arricchimento, mentre le fonti lente (crawl-delay di 10 s) continuano a leggere.
+
   python pipeline/build_feed.py                  run completo (quello di GitHub Actions)
   python pipeline/build_feed.py --only bpo,tbi   solo alcune fonti (debug)
   python pipeline/build_feed.py --dry-run        non scrive niente su disco
@@ -27,7 +30,7 @@ import rank  # noqa: E402
 import trends  # noqa: E402
 from describe import describe  # noqa: E402
 from classify import FontRadar, classify, cluster_duplicates, item_id, quality_gate  # noqa: E402
-from enrich import enrich_item  # noqa: E402
+from enrich import enrich_item, retry_image  # noqa: E402
 from ingest import FETCHERS, iso  # noqa: E402
 from net import dedup_key  # noqa: E402
 
@@ -87,6 +90,44 @@ def fix_font_credit(it: dict) -> None:
         it["author"] = ""
 
 
+IMG_RETRIES = 3           # nuovi tentativi per un'immagine non scaricata (entro IMG_RETRY_DAYS)
+IMG_RETRY_DAYS = 5
+BLOCKED = re.compile(r"HTTPError: (401|403|429|451)\b")
+BLOCK_RUNS = 6            # giri falliti di fila con "non vuoi me" prima di rallentare
+BLOCK_PAUSE = timedelta(hours=24)
+
+
+def blocked_pause(rec: dict | None, now: datetime) -> str | None:
+    """Fonte che ci blocca da BLOCK_RUNS giri (403/401/429/451): la si riprova una volta al giorno,
+    invece di bussare a ogni giro. Ritorna la data del prossimo tentativo, o None se va letta."""
+    if not rec or rec.get("ok") or rec.get("fails", 0) < BLOCK_RUNS:
+        return None
+    if not BLOCKED.search(rec.get("error", "")) or not rec.get("checked"):
+        return None
+    nxt = _dt(rec["checked"]) + BLOCK_PAUSE
+    return iso(nxt) if now < nxt else None
+
+
+def missing_images(store: dict[str, dict], state: dict, now: datetime) -> list[dict]:
+    """Item recenti rimasti senza immagine per un errore temporaneo (timeout, server giù in quel giro):
+    fino a IMG_RETRIES nuovi tentativi nei primi IMG_RETRY_DAYS giorni. Prima restavano senza foto per sempre."""
+    tries = state.setdefault("imgRetry", {})
+    todo = []
+    for it in store.values():
+        if it.get("image") or it.get("font") or it.get("type") or not it.get("images"):
+            continue
+        if now - _dt(it.get("seen") or it["date"]) > timedelta(days=IMG_RETRY_DAYS):
+            continue
+        n = tries.get(it["id"], 0)
+        if n >= IMG_RETRIES:
+            continue
+        tries[it["id"]] = n + 1
+        todo.append(it)
+    for k in [k for k in tries if k not in store]:
+        del tries[k]
+    return todo
+
+
 def slim(it: dict) -> dict:
     return {k: v for k, v in it.items()
             if k not in ("key", "penalty") and not (k in DROP_EMPTY and v in (None, "", [], 0))}
@@ -120,11 +161,58 @@ def main() -> int:
     known = {dedup_key(it["url"]): it["id"] for it in store.values()}
     log(f"DSGNBRD · {iso(now)} · archivio {len(store)} item · fonti attive {len(active)}")
 
-    # 1 ── FETCH (in parallelo; una fonte rotta non blocca le altre)
+    # 1-3 ── FETCH → QUALITY GATE + DEDUP → ARRICCHIMENTO, in flusso
+    # (una fonte rotta non blocca le altre; gli item nuovi si arricchiscono mentre le fonti lente leggono ancora)
     status: dict[str, dict] = {}
-    raw: list[dict] = []
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futs = {ex.submit(FETCHERS[s["type"]], s, state, now, retention): s for s in active}
+    ss = state.setdefault("sourceStatus", {})
+    fresh: list[dict] = []
+    raw_n, gated, paused = 0, 0, []
+    enrich_pool = None if args.no_enrich else ThreadPoolExecutor(max_workers=args.workers)
+    enrich_futs = []
+
+    def job(it: dict) -> dict:
+        src = all_sources[it["sid"]]
+        return enrich_item(it, delay=float(src.get("crawlDelay", 0)), now=now, og=src["type"] != "page")
+
+    retry = [] if args.no_enrich else missing_images(store, state, now)
+    retry_futs = [enrich_pool.submit(retry_image, it) for it in retry] if enrich_pool else []
+
+    def admit(items: list[dict]) -> None:
+        nonlocal gated
+        for it in items:
+            k = it["key"]
+            if k in known:
+                continue
+            rej = rejected.get(k)
+            if rej and not (rej.get("retry") and now - _dt(rej["at"]) > timedelta(days=1)):
+                continue
+            if not quality_gate(it, all_sources[it["sid"]]):
+                rejected[k] = {"at": iso(now), "why": "quality"}
+                gated += 1
+                continue
+            it["id"] = item_id(k)
+            it["seen"] = iso(now)
+            known[k] = it["id"]
+            fresh.append(it)
+            if enrich_pool:
+                enrich_futs.append(enrich_pool.submit(job, it))
+
+    def timed(fetcher, s: dict):
+        t = time.time()
+        items, st = fetcher(s, state, now, retention)
+        st["ms"] = round((time.time() - t) * 1000)
+        return items, st
+
+    t1 = time.time()
+    todo = []
+    for s in active:
+        nxt = None if args.only else blocked_pause(ss.get(s["id"]), now)
+        if nxt:
+            paused.append((s["id"], nxt))
+        else:
+            todo.append(s)
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        futs = {ex.submit(timed, FETCHERS[s["type"]], s): s for s in todo}
         for fut in as_completed(futs):
             s = futs[fut]
             try:
@@ -136,44 +224,33 @@ def main() -> int:
                 items, st = [], {"ok": False, "error": f"{type(e).__name__}: {str(e)[:180]}"}
             st["items"] = len(items)
             status[s["id"]] = st
-            raw += items
+            raw_n += len(items)
+            admit(items)
+    t_fetch = time.time() - t1
+    log(f"grezzi {raw_n} · nuovi {len(fresh)} · scartati dal quality gate {gated} · fonti lette in {t_fetch:.0f}s")
 
-    # 2 ── QUALITY GATE + DEDUP per URL canonico
-    fresh, gated = [], 0
-    for it in raw:
-        k = it["key"]
-        if k in known:
-            continue
-        rej = rejected.get(k)
-        if rej and not (rej.get("retry") and now - _dt(rej["at"]) > timedelta(days=1)):
-            continue
-        src = all_sources[it["sid"]]
-        if not quality_gate(it, src):
-            rejected[k] = {"at": iso(now), "why": "quality"}
-            gated += 1
-            continue
-        it["id"] = item_id(k)
-        it["seen"] = iso(now)
-        known[k] = it["id"]
-        fresh.append(it)
-    log(f"grezzi {len(raw)} · nuovi {len(fresh)} · scartati dal quality gate {gated}")
-
-    # 3 ── ARRICCHIMENTO (og:meta se mancano immagine/testo/data + dimensioni e palette)
-    if fresh and not args.no_enrich:
-        t1 = time.time()
-
-        def job(it: dict) -> dict:
-            return enrich_item(it, delay=float(all_sources[it["sid"]].get("crawlDelay", 0)))
-
-        with ThreadPoolExecutor(max_workers=args.workers) as ex:
-            list(ex.map(job, fresh))
-        log(f"arricchiti {len(fresh)} item in {time.time() - t1:.0f}s")
+    if enrich_pool:
+        for f in enrich_futs:
+            f.result()
+        recovered = sum(1 for f in retry_futs if f.result())
+        enrich_pool.shutdown()
+        for it in retry:
+            if it.get("image"):
+                state["imgRetry"].pop(it["id"], None)
+        log(f"arricchiti {len(fresh)} item (finito {time.time() - t1 - t_fetch:.0f}s dopo le fonti)"
+            + (f" · immagini recuperate {recovered}/{len(retry)}" if retry else ""))
 
     # 4 ── CLASSIFICAZIONE + FONT + controllo contesto
     explicit = sorted({f for it in list(store.values()) + fresh for f in (it.get("fonts") or [])})
     radar = FontRadar(state.get("gfCatalog", []), explicit)
+    cut = now - timedelta(days=retention)
     kept = []
     for it in fresh:
+        if _dt(it["date"]) < cut:
+            # la pagina ha rivelato una data più vecchia dell'archivio: prima l'item veniva salvato, cancellato
+            # subito dalla retention e poi riscaricato e rianalizzato a ogni giro
+            rejected[it["key"]] = {"at": iso(now), "why": "old"}
+            continue
         src = all_sources[it["sid"]]
         classify(it, src)
         it["fonts"] = radar.detect(it)
@@ -191,7 +268,6 @@ def main() -> int:
         kept.append(it)
 
     # retention
-    cut = now - timedelta(days=retention)
     for k in [k for k, it in store.items() if _dt(it["date"]) < cut]:
         del store[k]
     items = list(store.values())
@@ -204,6 +280,7 @@ def main() -> int:
         if s and freq[s] >= 3:
             i["image"], i["palette"] = None, None
             generic += 1
+            state.setdefault("imgRetry", {})[i["id"]] = IMG_RETRIES   # tolta apposta: da non "recuperare"
 
     # 5 ── CLUSTER: stesso progetto su più fonti → una card + "also covered by"
     dups = cluster_duplicates(items, weights, now)
@@ -244,7 +321,6 @@ def main() -> int:
     for it in items + pcards:
         by_month[it["date"][:7]].append(slim(it))
     heads = [i for i in items if not i.get("dupOf")]
-    ss = state.setdefault("sourceStatus", {})
     for sid, st in status.items():
         rec = ss.setdefault(sid, {})
         rec["checked"] = iso(now)
@@ -254,6 +330,10 @@ def main() -> int:
             rec.pop("error", None)
         else:
             rec.update(error=st["error"], fails=rec.get("fails", 0) + 1)
+    for sid, nxt in paused:
+        ss.setdefault(sid, {})["pausedUntil"] = nxt
+    for sid in status:
+        ss.get(sid, {}).pop("pausedUntil", None)
     counts = Counter(i["sid"] for i in heads)
     latest: dict[str, str] = {}
     for i in heads:
@@ -266,6 +346,7 @@ def main() -> int:
                   "genericImagesDropped": generic,
                   "sourcesOk": sum(1 for s in status.values() if s["ok"]),
                   "sourcesFailed": sum(1 for s in status.values() if not s["ok"]),
+                  "sourcesPaused": len(paused),
                   "seconds": round(time.time() - t0)},
         "categories": dict(Counter(i["category"] for i in heads)),
         "sources": [{k: s[k] for k in ("id", "name", "home", "category", "type", "weight", "award", "note")
@@ -301,13 +382,16 @@ def main() -> int:
         log(f"scritti {written} mesi + index.json + state.json")
 
     log("")
-    log(f"{'fonte':20} {'stato':6} {'item':>5}  nota")
+    log(f"{'fonte':20} {'stato':6} {'item':>5} {'tempo':>6}  nota")
+    pause_of = dict(paused)
     for s in cfg["sources"]:
         st = status.get(s["id"])
+        if s["id"] in pause_of:
+            log(f"{s['id']:20} {'PAUSA':6} {0:>5} {'':>6}  ci blocca da {BLOCK_RUNS}+ giri: riprovo dal {pause_of[s['id']]}")
         if not st:
             continue
         note = st.get("error") or st.get("note") or ""
-        log(f"{s['id']:20} {'ok' if st['ok'] else 'ERR':6} {st['items']:>5}  {note}")
+        log(f"{s['id']:20} {'ok' if st['ok'] else 'ERR':6} {st['items']:>5} {st.get('ms', 0) / 1000:5.1f}s  {note}")
     log("")
     log(f"card nel feed {len(heads)} (+{len(pcards)} palette) · cluster uniti {dups} · trend {len(tr['trends'])} "
         f"· baseline {'ok' if tr['baseline']['ok'] else 'in costruzione'} · {time.time() - t0:.0f}s")

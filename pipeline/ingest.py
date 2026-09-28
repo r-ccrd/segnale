@@ -13,7 +13,7 @@ from urllib.parse import quote_plus, urljoin
 import feedparser
 
 from net import (canonical_url, dedup_key, first_text_date, get_json,
-                 parse_page_meta, polite_get)
+                 parse_page_meta, polite_get, text_limited)
 
 UTC = timezone.utc
 TAG_RE = re.compile(r"<[^>]+>")
@@ -97,6 +97,22 @@ def entry_images(e, base: str) -> list[str]:
     return out[:4]
 
 
+def apply_og(it: dict, meta: dict, now: datetime) -> None:
+    """Completa i campi vuoti di un item con i meta della sua pagina (og:*, data, video)."""
+    if not it["images"] and meta["image"]:
+        it["images"] = [meta["image"]]
+    if not it["summary"] and meta["description"]:
+        it["summary"] = clean_text(meta["description"], 320)
+    if it["dateType"] == "detected" and meta["published"]:
+        d = to_dt(meta["published"])
+        # stesso controllo dei feed: una data nel futuro non è una data di pubblicazione
+        # (prima passava e l'item restava in cima al feed fino a quel giorno)
+        if d and d <= now + timedelta(days=1):
+            it["date"], it["dateType"] = iso(d), "article"
+    if not it["video"] and meta["video"]:
+        it["video"] = video_from_url(meta["video"])
+
+
 def _base_item(src: dict, url: str) -> dict:
     return {"sid": src["id"], "url": canonical_url(url), "key": dedup_key(url),
             "title": "", "summary": "", "author": "", "tags": [], "date": None,
@@ -116,10 +132,12 @@ def fetch_rss(src: dict, state: dict, now: datetime, retention_days: int) -> tup
     if r.status_code == 304:
         return [], {"ok": True, "http": 304, "note": "nessuna novità (304)"}
     r.raise_for_status()
-    state["http"][src["id"]] = {"etag": r.headers.get("ETag"), "modified": r.headers.get("Last-Modified")}
     feed = feedparser.parse(r.content)
     if not feed.entries:
         raise ValueError("feed senza item")
+    # ETag salvato solo dopo un parse riuscito: prima, una risposta rotta ma "200" restava in cache
+    # e i giri dopo ricevevano 304 ("nessuna novità") finché il feed non cambiava
+    state["http"][src["id"]] = {"etag": r.headers.get("ETag"), "modified": r.headers.get("Last-Modified")}
 
     first_run = src["id"] not in state.setdefault("seenSources", [])
     oldest = now - timedelta(days=retention_days)
@@ -161,6 +179,11 @@ def fetch_rss(src: dict, state: dict, now: datetime, retention_days: int) -> tup
 
 
 # ------------------------------------------------------------- page watcher
+PAGE_MAX_BYTES = 6 * 1024 * 1024
+PAGE_DEADLINE = 25.0         # tempo totale per scaricare una pagina progetto
+DEAD_AFTER = 3               # un link che dà 404/410 per 3 giri di fila non si riprova più
+
+
 def fetch_page(src: dict, state: dict, now: datetime, retention_days: int) -> tuple[list, dict]:
     """Legge una pagina elenco pubblica, trova i link nuovi, legge og:meta di ciascuno."""
     delay = float(src.get("crawlDelay", 1))
@@ -177,17 +200,28 @@ def fetch_page(src: dict, state: dict, now: datetime, retention_days: int) -> tu
         raise ValueError("nessun link trovato: il markup della pagina potrebbe essere cambiato")
 
     seen = state.setdefault("pageSeen", {}).setdefault(src["id"], {})
+    dead = state.setdefault("pageDead", {}).setdefault(src["id"], {})
+    for u in [u for u in dead if u not in seen_now]:
+        del dead[u]
     fresh = [u for u in links if u not in seen]
     todo = fresh[: int(src.get("maxNewPerRun", 12))]
     oldest = now - timedelta(days=retention_days)
     items, failed = [], 0
     for url in todo:
         try:
-            pr = polite_get(url, delay=delay)
+            pr = polite_get(url, delay=delay, stream=True)
             if pr.status_code != 200:
+                # link morto: prima veniva riscaricato a ogni giro, per sempre (con il crawl-delay)
+                if pr.status_code in (404, 410):
+                    dead[url] = dead.get(url, 0) + 1
+                    if dead[url] >= DEAD_AFTER:
+                        seen[url] = iso(now)
+                        del dead[url]
+                pr.close()
                 failed += 1
                 continue
-            meta = parse_page_meta(pr.text, url)
+            text = text_limited(pr, PAGE_MAX_BYTES, PAGE_DEADLINE)
+            meta = parse_page_meta(text, url)
         except Exception:
             failed += 1
             continue
@@ -202,17 +236,21 @@ def fetch_page(src: dict, state: dict, now: datetime, retention_days: int) -> tu
         if meta["image"]:
             it["images"] = [meta["image"]]
         if src.get("fontsPattern"):
-            fonts = [clean_text(f, 60) for f in re.findall(src["fontsPattern"], pr.text)]
+            fonts = [clean_text(f, 60) for f in re.findall(src["fontsPattern"], text)]
             it["fonts"] = list(dict.fromkeys(f for f in fonts if f))[:6]
         d = to_dt(meta["published"])
         if d is None and src.get("dateTextPattern"):
-            d = to_dt(first_text_date(pr.text))
+            d = to_dt(first_text_date(text))
         # sanity check: una data nel futuro o incoerente diventa "rilevato"
         if d is None or d > now + timedelta(days=1):
             d, it["dateType"] = now, "detected"
         if d < oldest:
             continue
         it["date"] = iso(d)
+        # se mancava qualcosa, l'arricchimento riscaricava questa stessa pagina (con altro crawl-delay)
+        # solo per rileggerne i meta: sono già qui
+        if not it["images"] or not it["summary"] or it["dateType"] == "detected":
+            apply_og(it, meta, now)
         items.append(it)
     return items, {"ok": True, "http": r.status_code, "links": len(links),
                    "new": len(fresh), "fetched": len(todo) - failed, "failed": failed}

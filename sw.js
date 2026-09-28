@@ -1,9 +1,11 @@
 /* DSGNBRD service worker
    - app shell: stale-while-revalidate (si apre offline, si aggiorna al giro dopo)
-   - data/*.json: network-first con copia di riserva (offline vedi l'ultimo feed scaricato)
+   - data/*.json: network-first con copia di riserva (offline vedi l'ultimo feed scaricato); se la rete
+     resta appesa per NET_WAIT ms si mostra la copia e la risposta vera aggiorna la cache per la volta dopo
    - Google Fonts: cache-first solo per il CSS di Archivo e i file dei font
    - immagini dei progetti: NON in cache (restano sui server delle fonti) */
-const VERSION = 'dsgnbrd-shell-2';
+const VERSION = 'dsgnbrd-shell-3';
+const NET_WAIT = 5000;
 const DATA = 'dsgnbrd-data';
 const FONTS = 'dsgnbrd-fonts';
 const SHELL = ['./', './index.html', './assets/app.css', './assets/app.js', './manifest.webmanifest',
@@ -25,24 +27,25 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin === self.location.origin) {
-    if (url.pathname.includes('/data/')) e.respondWith(networkFirst(req));
+    if (url.pathname.includes('/data/')) e.respondWith(networkFirst(e));
     else e.respondWith(staleWhileRevalidate(req));
     return;
   }
   const archivoCss = url.hostname === 'fonts.googleapis.com' && url.search.includes('family=Archivo');
   if (archivoCss || url.hostname === 'fonts.gstatic.com') e.respondWith(cacheFirst(req));
 });
-async function networkFirst(req) {
+async function networkFirst(e) {
+  const req = e.request;
   const cache = await caches.open(DATA);
-  try {
-    const res = await fetch(req);
-    if (res.ok) cache.put(req, res.clone());
+  const net = fetch(req).then((res) => {
+    if (res.ok) e.waitUntil(cache.put(req, res.clone()).catch(() => {}));
     return res;
-  } catch (err) {
-    const hit = await cache.match(req, { ignoreSearch: true });
-    if (hit) return hit;
-    throw err;
-  }
+  });
+  e.waitUntil(net.catch(() => {})); // il service worker resta vivo finché la risposta vera non arriva in cache
+  const hit = await cache.match(req, { ignoreSearch: true });
+  if (!hit) return net;
+  // prima: senza copia di riserva a tempo, una rete "appesa" (Wi-Fi debole) lasciava lo scheletro per decine di secondi
+  return Promise.race([net.catch(() => hit), new Promise((ok) => setTimeout(() => ok(hit), NET_WAIT))]);
 }
 async function staleWhileRevalidate(req) {
   const cache = await caches.open(VERSION);
