@@ -38,7 +38,7 @@ function icon(id) {
 }
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
-const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const cap1 = (s) => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
 const motionOK = () => !matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -265,9 +265,22 @@ function addItems(list) {
     S.items.push(it);
   }
 }
+const early = new Map(); // mesi chiesti in anticipo, in parallelo con index.json (vedi init)
+function prefetchMonths() {
+  const d = new Date();
+  for (const k of [0, 1]) {
+    const m = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - k, 1)).toISOString().slice(0, 7);
+    const p = getJSON(`data/archive/${m}.json`);
+    p.catch(() => {}); // un mese che non esiste ancora (inizio mese) non è un errore
+    early.set(m, p);
+  }
+}
 async function loadMonth(m) {
   if (S.loaded.has(m)) return;
-  const data = await getJSON(`data/archive/${m}.json`);
+  const url = `data/archive/${m}.json`;
+  const pre = early.get(m);
+  early.delete(m);
+  const data = pre ? await pre.catch(() => getJSON(url)) : await getJSON(url);
   addItems(data.items || []);
   S.loaded.add(m);
 }
@@ -470,12 +483,29 @@ function setCols(blk) {
   blk.n = n; blk.width = window.innerWidth; blk.cols.textContent = ''; blk.heights = new Array(n).fill(0); blk.colEls = [];
   for (let i = 0; i < n; i++) { const c = h('div', { class: 'col' }); blk.cols.append(c); blk.colEls.push(c); }
 }
-function place(blk, card) {
-  let k = 0;
-  for (let i = 1; i < blk.n; i++) if (blk.heights[i] < blk.heights[k] - 1) k = i;
-  blk.colEls[k].append(card);
-  blk.heights[k] += card.offsetHeight + 20;
-  return k;
+// Ogni card va nella colonna più bassa. Le colonne hanno tutte la stessa larghezza, quindi le altezze di un lotto
+// si misurano insieme nella prima colonna (un solo calcolo di layout) e poi le card si spostano al loro posto.
+// Prima: un offsetHeight dopo ogni append, cioè un layout forzato per card (su rotazione/resize, uno per card del feed).
+function placeAll(blk, cards) {
+  if (!cards.length) return [];
+  const probe = blk.colEls[0];
+  for (const c of cards) probe.append(c);
+  const hs = cards.map((c) => c.offsetHeight);
+  return cards.map((c, j) => {
+    let k = 0;
+    for (let i = 1; i < blk.n; i++) if (blk.heights[i] < blk.heights[k] - 1) k = i;
+    blk.colEls[k].append(c);
+    blk.heights[k] += hs[j] + 20;
+    return k;
+  });
+}
+// Ridistribuisce tutte le card di un blocco. Con la vista nascosta (Trending, Saved) le altezze varrebbero 0 e il
+// mosaico si sbilancerebbe: il blocco resta com'è e si rifà quando il feed torna visibile.
+function layoutBlock(blk) {
+  if (blk.cols.offsetParent === null) { blk.stale = true; return; }
+  blk.stale = false;
+  setCols(blk);
+  placeAll(blk, blk.cards);
 }
 function makeBlock(g) {
   const all = [g.lead, ...g.items].filter((x) => x && x.type !== 'trend');
@@ -498,21 +528,21 @@ function makeBlock(g) {
 function renderMore(n = 30) {
   if (S.view !== 'feed') return;
   let budget = n;
-  const list = flatList();
+  let list = null; // lista per la navigazione delle card trend: calcolata solo se nel lotto ce n'è una
   while (budget > 0 && S.gi < S.groups.length) {
     const g = S.groups[S.gi];
     let blk = S.blocks.get(g.day);
     if (!blk) { blk = makeBlock(g); feedEl.append(blk.el); budget -= 2; }
+    const batch = [];
     while (budget > 0 && g.ii < g.items.length) {
       const it = g.items[g.ii++];
       if (S.renderedIds.has(it.id)) continue;
-      const c = cardEl(it, it.type === 'trend' ? list : undefined);
-      blk.cards.push(c);
-      const k = place(blk, c);
-      reveal(c, k * 45);
+      if (it.type === 'trend' && !list) list = flatList();
+      batch.push(cardEl(it, it.type === 'trend' ? list : undefined));
       S.renderedIds.add(it.id);
       budget--;
     }
+    placeAll(blk, batch).forEach((k, j) => { blk.cards.push(batch[j]); reveal(batch[j], k * 45); });
     if (g.ii >= g.items.length) S.gi++;
   }
   if (S.gi >= S.groups.length) loadOlder();
@@ -558,16 +588,15 @@ function relayout() {
   const blocks = [...S.blocks.values()];
   if (S.savedBlk) blocks.push(S.savedBlk);
   for (const blk of blocks) {
-    if (blk.n === n && Math.abs(blk.width - window.innerWidth) < 40) continue;
-    setCols(blk);
-    for (const c of blk.cards) place(blk, c);
+    if (!blk.stale && blk.n === n && Math.abs(blk.width - window.innerWidth) < 40) continue;
+    layoutBlock(blk);
   }
 }
 function removeCards(pred) {
   for (const blk of S.blocks.values()) {
     const before = blk.cards.length;
     blk.cards = blk.cards.filter((c) => !pred(c.dataset));
-    if (blk.cards.length !== before) { setCols(blk); for (const c of blk.cards) place(blk, c); }
+    if (blk.cards.length !== before) layoutBlock(blk);
   }
   $$('.lead, .band', feedEl).forEach((n) => { if (pred(n.dataset)) n.remove(); });
 }
@@ -910,7 +939,7 @@ function setView(v) {
   if (S.wheel) S.wheel.close();
   if (v === 'trending') renderTrending();
   if (v === 'saved') renderSaved();
-  if (v === 'feed' && !S.blocks.size) rebuild();
+  if (v === 'feed') { if (!S.blocks.size) rebuild(); else relayout(); }
   const sec = { feed: feedEl, trending: trendEl, saved: savedEl }[v];
   if (motionOK()) restart(sec, 'enter');
   window.scrollTo(0, 0);
@@ -959,7 +988,8 @@ function renderSaved() {
   savedEl.append(cols);
   const blk = { el: savedEl, cols, cards: [] };
   setCols(blk);
-  for (const it of list) { const c = cardEl(it, list); blk.cards.push(c); reveal(c, place(blk, c) * 45); }
+  blk.cards = list.map((it) => cardEl(it, list));
+  placeAll(blk, blk.cards).forEach((k, j) => reveal(blk.cards[j], k * 45));
   S.savedBlk = blk;
 }
 function exportData() {
@@ -1394,7 +1424,7 @@ function initWheel() {
     openT = performance.now(); lastT = 0;
     draw(openT);
     void root.offsetWidth;
-    root.classList.add('open');
+    root.classList.add('on');
     if (!raf) raf = requestAnimationFrame(loop);
     if (m === 'sticky') labels[cur].focus({ preventScroll: true });
     hideHint();
@@ -1405,7 +1435,7 @@ function initWheel() {
     mode = null; autoV = 0; target = null; spin = null;
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
-    root.classList.remove('open');
+    root.classList.remove('on');
     handle.setAttribute('aria-expanded', 'false');
     document.body.classList.remove('wheel-on');
     needle.style.opacity = '0';
@@ -1697,12 +1727,15 @@ async function init() {
     [0, 1, 2].slice(0, colCount()).map((i) => h('div', { class: 'col' }, [0, 1].map((j) => h('div', { class: 'skel', style: `height:${[260, 180, 320, 220, 280, 200][i * 2 + j]}px` }))))));
   try {
     if (location.protocol === 'file:') throw new Error('file');
+    prefetchMonths();
     const idx = await getJSON('data/index.json', true);
     S.index = idx;
     S.srcNames = Object.fromEntries(idx.sources.map((s) => [s.id, s.name]));
     S.months = (idx.months || []).map((m) => m.id);
     S.trendItems = (idx.trends || []).filter((t) => t.label !== 'Consolidated').map(asTrend);
     await Promise.all(S.months.slice(0, 2).map((m) => loadMonth(m)));
+    // con i dati in anticipo il carattere del testo può arrivare dopo: le altezze delle card vanno misurate con lui
+    await Promise.race([document.fonts.load('1em Archivo').catch(() => {}), new Promise((r) => setTimeout(r, 800))]);
     rebuild(true);
     const want = new URLSearchParams(location.search).get('view'); // scorciatoie dell'icona (manifest)
     if (want === 'trending' || want === 'saved') setView(want);

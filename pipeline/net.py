@@ -17,6 +17,7 @@ from html.parser import HTMLParser
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import requests
+from requests.adapters import HTTPAdapter
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
 UA = (
@@ -25,31 +26,73 @@ UA = (
     else "DSGNBRD-feed/1.0 (personal design feed reader)"
 )
 TIMEOUT = 20
+RETRY_STATUS = {500, 502, 503, 504}   # errori temporanei del server: un secondo tentativo, con calma
 
 _session = requests.Session()
 _session.headers.update({"User-Agent": UA, "Accept-Language": "en;q=0.9,it;q=0.8"})
+# ~50 host diversi a giro: con il pool di default (10 host) le connessioni venivano buttate e riaperte (TLS ogni volta)
+_adapter = HTTPAdapter(pool_connections=64, pool_maxsize=32)
+_session.mount("https://", _adapter)
+_session.mount("http://", _adapter)
 _guard = threading.Lock()
 _sems: dict[str, threading.Semaphore] = {}
 _last: dict[str, float] = {}
 
 
 def polite_get(url: str, delay: float = 0.0, headers: dict | None = None,
-               stream: bool = False, timeout: int = TIMEOUT) -> requests.Response:
+               stream: bool = False, timeout: int = TIMEOUT, retries: int = 1) -> requests.Response:
+    """GET educato: max 3 richieste per host (1 con crawl-delay), crawl-delay rispettato anche nei tentativi.
+    Timeout, connessione caduta e 5xx vengono ritentati `retries` volte; 4xx mai (403/429 = il sito non vuole)."""
     host = urlparse(url).netloc
     with _guard:
         sem = _sems.setdefault(host, threading.Semaphore(1 if delay else 3))
-    with sem:
-        if delay:
-            with _guard:
-                wait = _last.get(host, 0.0) + delay - time.time()
-            if wait > 0:
-                time.sleep(wait)
-        try:
-            return _session.get(url, headers=headers or {}, timeout=timeout,
-                                stream=stream, allow_redirects=True)
-        finally:
-            with _guard:
-                _last[host] = time.time()
+    attempt = 0
+    while True:
+        r = None
+        with sem:
+            if delay:
+                with _guard:
+                    wait = _last.get(host, 0.0) + delay - time.time()
+                if wait > 0:
+                    time.sleep(wait)
+            try:
+                r = _session.get(url, headers=headers or {}, timeout=timeout,
+                                 stream=stream, allow_redirects=True)
+            except (requests.Timeout, requests.ConnectionError):
+                if attempt >= retries:
+                    raise
+            finally:
+                with _guard:
+                    _last[host] = time.time()
+        if r is not None and (r.status_code not in RETRY_STATUS or attempt >= retries):
+            return r
+        if r is not None:
+            r.close()
+        attempt += 1
+        time.sleep(max(delay, 2.0))
+
+
+def read_limited(r: requests.Response, max_bytes: int, deadline: float, truncate: bool = False) -> bytes | None:
+    """Corpo di una risposta `stream=True` con un tetto di byte e di tempo TOTALE.
+    (`timeout=` di requests vale per singola lettura: un server che manda a gocce non scade mai.)
+    Oltre il tetto: None, oppure la parte letta se truncate=True (basta per i meta tag nell'<head>)."""
+    buf, size, t0 = [], 0, time.monotonic()
+    try:
+        for chunk in r.iter_content(65536):
+            buf.append(chunk)
+            size += len(chunk)
+            if size > max_bytes or time.monotonic() - t0 > deadline:
+                return b"".join(buf) if truncate else None
+    finally:
+        r.close()
+    return b"".join(buf)
+
+
+def text_limited(r: requests.Response, max_bytes: int, deadline: float) -> str:
+    """Come r.text (stessa scelta dell'encoding), ma con i tetti di read_limited."""
+    r._content = read_limited(r, max_bytes, deadline, truncate=True) or b""
+    r._content_consumed = True
+    return r.text
 
 
 # --------------------------------------------------------------------------- URL

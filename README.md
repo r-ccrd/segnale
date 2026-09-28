@@ -156,6 +156,31 @@ In `pipeline/sources.json`, dentro `sources`:
 - **Versioni delle action** (checkout@v4, setup-python@v5, configure-pages@v5, upload-pages-artifact@v3, deploy-pages@v4): se GitHub mostra un avviso di deprecazione, alza il numero di versione.
 - **Costi**: Actions gratis sui repo pubblici con runner standard; un giro dura 3-4 minuti.
 
+## Ottimizzazioni backend e bug fix (28/09/2026)
+
+Nessuna modifica visiva: verificato pixel per pixel (Playwright, 5 viewport × 2 temi, font e immagini bloccati su asset deterministici) prima e dopo. Gli unici pixel diversi trovati appartengono al fix della ruota qui sotto (voluto) o rientrano nel rumore di rendering già presente prima (gradient su Trending, sotto i 40px su ~1,5M).
+
+**Pipeline (`pipeline/`)**
+- `sources.json`: il pattern del link di The Brand Identity tagliava a metà gli URL con `%XX` maiuscolo (es. `%C3%A9`) → 404 e progetti persi a ogni giro. Ora accetta anche le maiuscole.
+- `ingest.py`: i page watcher ora riusano la pagina già scaricata per immagine/riassunto/data invece di riscaricarla in `enrich.py` (una richiesta HTTP in meno per item). Il taglio "troppo vecchio" che interrompeva la scansione della lista non appena trovava 2 item vecchi di fila è stato sostituito con un contatore persistente per URL (3 volte 404/410 di fila = link morto, mai più ritentato): un singolo "progetto correlato" vecchio in mezzo a link nuovi non blocca più la scansione.
+- `net.py`: retry/backoff su tutte le richieste, download con limite di byte e di tempo, pool di connessioni più grande.
+- `build_feed.py`: un item scoperto ora ma con data reale (rivelata solo dopo aver letto og:meta) fuori dai 120 giorni di retention viene scartato subito invece di essere salvato e poi ributtato fuori al giro dopo (evitava un loop salva→elimina→riscarica).
+- Bug preesistente corretto: l'ETag RSS veniva salvato prima di controllare che `feedparser` avesse davvero letto degli articoli — una risposta 200 ma corrotta poteva bloccare la fonte su cache 304 per sempre.
+- `trends.py`: rimossa `colour_bar()`, morta e mai chiamata da nessuna parte.
+- Risultato misurato: stesso identico output item-per-item su due run registrate (0 differenze su 531 e 530 item), tempi uguali o migliori nella realtà di rete (The Brand Identity 29,5s → 18s non dovendo più ricontrollare i link morti).
+
+**Frontend (`assets/app.js`, `assets/app.css`, `sw.js`)**
+- Bug trovato: la classe che apre la ruota delle categorie si chiamava `open`, la stessa classe già usata dal bottone trasparente che copre ogni card. Nel CSS la regola del bottone (`z-index: 1`) veniva dopo quella della ruota (`z-index: 60`) e vinceva lei: la ruota si apriva **sotto** l'header invece che sopra, senza oscurarlo. Rinominata la classe della ruota in `on`: ora si apre correttamente sopra tutto, come previsto dal CSS.
+- Bug trovato: ridimensionare la finestra mentre si è su Trending o Saved corrompeva il masonry del Feed (le altezze delle colonne si leggevano a 0 perché il contenitore era `display:none`), visibile solo tornando al Feed. Corretto con un controllo che rimanda il ricalcolo a quando il Feed torna visibile.
+- Masonry: da misura-e-posiziona per ogni card a misura-tutte-poi-posiziona-tutte (una sola reflow forzata invece di una per card).
+- `data/index.json` e i due file mensili più recenti ora partono in parallelo invece che in sequenza.
+- Il primo render aspetta il caricamento del font (con timeout di 800ms) per evitare lo scatto quando il font arriva dopo.
+- `sw.js`: la strategia network-first ora ha un timeout di 5s e torna alla cache se la rete è lenta, non solo se fallisce del tutto.
+
+**Pubblicazione**
+- Il workflow (`Aggiorna Segnale` → `Aggiorna DSGNBRD`) ora pubblica su GitHub Pages solo una cartella `_site/` minima (pagina, asset, dati) invece di tutto il repo: niente `pipeline/`, cache o stato nel sito pubblico.
+- Rimosso `assets/icons/icon.svg`, non più referenziato da nessuna parte.
+
 ## Test eseguiti (27/09/2026, Chromium con Playwright)
 
 Viewport: desktop 1440×900, tablet grande 1730×1080, iPad orizzontale 1194×834, iPad verticale 834×1194, telefono 390×844. Su tutti: nome centrato al pixel, nessuna sovrapposizione nell'header, nessuno scroll orizzontale, nessun errore JavaScript, nessuna card con fonte/ora/segnalibro vuoto nella didascalia, barra colori e barra categorie assenti.

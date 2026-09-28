@@ -121,7 +121,7 @@
       "type": "page",
       "url": "https://the-brandidentity.com/",
       "base": "https://the-brandidentity.com",
-      "linkPattern": "/project/[a-z0-9%\\-]+",
+      "linkPattern": "/project/[A-Za-z0-9%\\-]+",
       "category": "branding",
       "weight": 0.95,
       "crawlDelay": 2,

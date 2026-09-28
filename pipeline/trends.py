@@ -393,24 +393,7 @@ def compute(items: list[dict], state: dict, now: datetime, names: dict[str, str]
     }
 
 
-# -------------------------------------------------------------------- colour bar + palette cards
-def colour_bar(items: list[dict], now: datetime, max_n: int = 16) -> dict:
-    heads = [i for i in items if not i.get("dupOf") and i.get("palette") and i.get("type") != "colour"]
-    for hours in (24, 48, 72, 168):
-        pool = [i for i in heads if now - _dt(i["seen"] if i.get("seen") else i["date"]) <= timedelta(hours=hours)
-                and now - _dt(i["date"]) <= timedelta(hours=hours + 48)]
-        if len(pool) >= 8:
-            break
-    pool.sort(key=lambda i: -i.get("score", 0))
-    segs = []
-    for i in pool[: max_n]:
-        chrom = [c for c in i["palette"] if is_chromatic(c["hex"]) and c["share"] >= 0.04]
-        c = (chrom or i["palette"])[0]
-        segs.append({"hex": c["hex"], "id": i["id"], "title": i["title"], "sid": i["sid"]})
-    segs.sort(key=lambda s: (not is_chromatic(s["hex"]), hex_to_hls(s["hex"])[0]))
-    return {"hours": hours, "segments": segs}
-
-
+# -------------------------------------------------------------------- palette cards
 def palette_cards(items: list[dict], per_day: int = 2) -> list[dict]:
     by_day: dict[str, list[dict]] = defaultdict(list)
     for i in items:
